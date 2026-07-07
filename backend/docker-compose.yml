@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: flori_scouting_db
+    environment:
+      POSTGRES_USER: flori
+      POSTGRES_PASSWORD: flori
+      POSTGRES_DB: flori_scouting
+    ports:
+      - "5432:5432"
+    volumes:
+      - flori_scouting_pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flori -d flori_scouting"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: flori_scouting_api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flori:flori@db:5432/flori_scouting
+      SECRET_KEY: docker-dev-secret-change-me
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+      SEED_ON_STARTUP: "true"
+    ports:
+      - "8000:8000"
+
+volumes:
+  flori_scouting_pgdata:
