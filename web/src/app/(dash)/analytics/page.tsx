@@ -5,13 +5,17 @@ import { useMemo, useState } from "react";
 
 import {
   CostTrendChart,
+  Donut,
   HBarChart,
   HeatMatrix,
+  ParetoChart,
   SeverityHistogram,
   SprayTimingChart,
+  StackedBarChart,
   TrendChart,
 } from "@/components/charts";
 import { FilterBar, defaultFilters } from "@/components/FilterBar";
+import { PaginationBar, usePagination } from "@/components/Pagination";
 import {
   Badge,
   Card,
@@ -52,6 +56,15 @@ const TABS = [
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
+
+const SCOUTING_TYPE_COLORS: Record<string, string> = {
+  pest: "#10b981",
+  disease: "#f59e0b",
+  lure: "#6366f1",
+  sticky_trap: "#0ea5e9",
+};
+
+const STACK_COLORS = ["#0ea5e9", "#6366f1", "#f59e0b", "#10b981", "#dc2626", "#7c3aed", "#94a3b8"];
 
 // ── Local helpers (pure, no backend changes needed) ─────────────────────
 
@@ -215,6 +228,39 @@ export default function AnalyticsPage() {
     }));
   }, [filteredSpray]);
 
+  // Applications by coverage type, per month — feeds the stacked bar in Spray Overview.
+  const coverageTimeline = useMemo(() => {
+    const keySet = new Set<string>();
+    const perMonth = new Map<string, Record<string, number>>();
+    for (const row of filteredSpray) {
+      const mk = monthKey(row.recorded_at);
+      const coverage = row.coverage?.trim() || "Unspecified";
+      keySet.add(coverage);
+      const bucket = perMonth.get(mk) ?? {};
+      bucket[coverage] = (bucket[coverage] ?? 0) + 1;
+      perMonth.set(mk, bucket);
+    }
+    const keys = Array.from(keySet).sort();
+    const data = Array.from(perMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([mk, bucket]) => {
+        const row: Record<string, string | number> = { period: monthLabel(mk) };
+        for (const k of keys) row[k] = bucket[k] ?? 0;
+        return row;
+      });
+    return { keys, data };
+  }, [filteredSpray]);
+
+  // Scouting composition by type — feeds the donut in Overview.
+  const scoutingByType = useMemo(() => {
+    const entries = Object.entries(summary.data?.by_type ?? {});
+    return entries.map(([name, value]) => ({
+      name,
+      value,
+      color: SCOUTING_TYPE_COLORS[name] ?? "#94a3b8",
+    }));
+  }, [summary.data]);
+
   // One row per spray program: window, products, greenhouses, cost, PHI status.
   const programs = useMemo(() => {
     type ProgramRow = {
@@ -260,6 +306,10 @@ export default function AnalyticsPage() {
     }
     return Array.from(map.values()).sort((a, b) => (b.lastDate ?? "").localeCompare(a.lastDate ?? ""));
   }, [filteredSpray, ghName]);
+
+  const scoutingTable = usePagination(filteredScoutingRecords, 25, recordSearch);
+  const movementTable = usePagination(scouts.data ?? [], 10);
+  const programsTable = usePagination(programs, 10);
 
   const summaryCards = [
     {
@@ -359,6 +409,36 @@ export default function AnalyticsPage() {
 
           <div className="px-6">
             <Card>
+              <CardHeader title="Scouting composition" subtitle="Records by scouting type in the current window." />
+              <div className="p-4">
+                {summary.isLoading ? (
+                  <Spinner />
+                ) : scoutingByType.length === 0 ? (
+                  <EmptyState>No scouting records in range.</EmptyState>
+                ) : (
+                  <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+                    <div className="w-full max-w-[220px]">
+                      <Donut data={scoutingByType} height={200} />
+                    </div>
+                    <div className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-1">
+                      {scoutingByType.map((t) => (
+                        <div key={t.name} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface/70 px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.color }} />
+                            <span className="text-sm capitalize text-ink-soft">{t.name}</span>
+                          </div>
+                          <span className="text-sm font-semibold tabular-nums text-ink">{t.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
+
+          <div className="px-6">
+            <Card>
               <CardHeader
                 title="Jump to a report"
                 subtitle="Every report below, one tap away."
@@ -422,7 +502,7 @@ export default function AnalyticsPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredScoutingRecords.map((row) => (
+                      scoutingTable.paged.map((row) => (
                         <tr key={row.id} className="hover:bg-surface">
                           <td className="px-3 py-2.5 whitespace-nowrap text-ink-soft">
                             {new Date(row.recorded_at).toLocaleString("en-GB", {
@@ -442,6 +522,14 @@ export default function AnalyticsPage() {
                 </table>
               </div>
             </div>
+            <PaginationBar
+              page={scoutingTable.page}
+              totalPages={scoutingTable.totalPages}
+              pageSize={scoutingTable.pageSize}
+              total={scoutingTable.total}
+              onPage={scoutingTable.setPage}
+              onPageSize={scoutingTable.setPageSize}
+            />
           </Card>
         </div>
       )}
@@ -535,7 +623,7 @@ export default function AnalyticsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {(scouts.data ?? []).map((s) => (
+                  {movementTable.paged.map((s) => (
                     <tr key={s.scout_id} className="hover:bg-surface">
                       <td className="px-5 py-2.5 font-medium">{s.name}</td>
                       <td className="px-3 py-2.5 tabular-nums">{s.records}</td>
@@ -553,6 +641,15 @@ export default function AnalyticsPage() {
                 </tbody>
               </table>
             </div>
+            <PaginationBar
+              page={movementTable.page}
+              totalPages={movementTable.totalPages}
+              pageSize={movementTable.pageSize}
+              total={movementTable.total}
+              onPage={movementTable.setPage}
+              onPageSize={movementTable.setPageSize}
+              pageSizeOptions={[10, 25, 50]}
+            />
           </Card>
         </div>
       )}
@@ -572,6 +669,28 @@ export default function AnalyticsPage() {
                   <EmptyState>No spray records in range.</EmptyState>
                 ) : (
                   <SprayTimingChart data={sprayTiming} height={260} />
+                )}
+              </div>
+            </Card>
+          </div>
+          <div className="px-6">
+            <Card>
+              <CardHeader
+                title="Coverage over time"
+                subtitle="Applications by coverage type, per month."
+              />
+              <div className="p-4">
+                {spray.isLoading ? (
+                  <Spinner />
+                ) : coverageTimeline.data.length === 0 ? (
+                  <EmptyState>No spray records in range.</EmptyState>
+                ) : (
+                  <StackedBarChart
+                    data={coverageTimeline.data}
+                    keys={coverageTimeline.keys}
+                    colors={STACK_COLORS}
+                    height={260}
+                  />
                 )}
               </div>
             </Card>
@@ -609,7 +728,7 @@ export default function AnalyticsPage() {
                         </td>
                       </tr>
                     ) : (
-                      programs.map((p) => (
+                      programsTable.paged.map((p) => (
                         <tr key={p.program} className="hover:bg-surface">
                           <td className="px-5 py-2.5 font-medium text-ink">{p.program}</td>
                           <td className="px-3 py-2.5 text-ink-soft">
@@ -641,6 +760,15 @@ export default function AnalyticsPage() {
                   </tbody>
                 </table>
               </div>
+              <PaginationBar
+                page={programsTable.page}
+                totalPages={programsTable.totalPages}
+                pageSize={programsTable.pageSize}
+                total={programsTable.total}
+                onPage={programsTable.setPage}
+                onPageSize={programsTable.setPageSize}
+                pageSizeOptions={[10, 25, 50]}
+              />
             </Card>
           </div>
         </>
@@ -718,7 +846,7 @@ export default function AnalyticsPage() {
           <Card>
             <CardHeader
               title="Greenhouse cost report"
-              subtitle={`Total ${money(totalSprayCost)} in the selected range`}
+              subtitle={`Total ${money(totalSprayCost)} in the selected range — cumulative % shows where spend concentrates.`}
             />
             <div className="p-4">
               {spray.isLoading ? (
@@ -726,10 +854,10 @@ export default function AnalyticsPage() {
               ) : greenhouseCostBreakdown.length === 0 ? (
                 <EmptyState>No spray records in range.</EmptyState>
               ) : (
-                <HBarChart
+                <ParetoChart
                   data={greenhouseCostBreakdown.slice(0, 12).map((r) => ({ label: r.label, value: r.value }))}
                   color="#059669"
-                  height={240}
+                  height={280}
                 />
               )}
             </div>
@@ -756,17 +884,17 @@ export default function AnalyticsPage() {
             </div>
           </Card>
           <Card>
-            <CardHeader title="Chemical spend" subtitle="Same products, ranked by total cost." />
+            <CardHeader title="Chemical spend" subtitle="Same products, ranked by total cost — with cumulative % concentration." />
             <div className="p-4">
               {spray.isLoading ? (
                 <Spinner />
               ) : chemicalCostBreakdown.length === 0 ? (
                 <EmptyState>No spray cost data in range.</EmptyState>
               ) : (
-                <HBarChart
-                  data={chemicalCostBreakdown.slice(0, 8).map((r) => ({ label: r.label, value: r.value }))}
+                <ParetoChart
+                  data={chemicalCostBreakdown.slice(0, 10).map((r) => ({ label: r.label, value: r.value }))}
                   color="#dc2626"
-                  height={220}
+                  height={260}
                 />
               )}
             </div>
@@ -777,17 +905,17 @@ export default function AnalyticsPage() {
       {activeTab === "variety-cost" && (
         <div className="px-6">
           <Card>
-            <CardHeader title="Variety cost report" subtitle="Spray spend concentrated by variety." />
+            <CardHeader title="Variety cost report" subtitle="Spray spend concentrated by variety, with cumulative % of total." />
             <div className="p-4">
               {spray.isLoading ? (
                 <Spinner />
               ) : varietyCostBreakdown.length === 0 ? (
                 <EmptyState>No variety cost data in range.</EmptyState>
               ) : (
-                <HBarChart
+                <ParetoChart
                   data={varietyCostBreakdown.slice(0, 10).map((r) => ({ label: r.label, value: r.value }))}
                   color="#dc2626"
-                  height={240}
+                  height={280}
                 />
               )}
             </div>

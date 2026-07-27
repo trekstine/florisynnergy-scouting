@@ -7,6 +7,7 @@ import {
   CartesianGrid,
   Cell,
   ComposedChart,
+  Legend,
   Line,
   Pie,
   PieChart,
@@ -245,3 +246,126 @@ export function CostTrendChart({
     </ResponsiveContainer>
   );
 }
+
+/**
+ * More additions for components/charts.tsx.
+ *
+ * IMPORTANT: these two need `Legend` added to the existing recharts import
+ * at the top of charts.tsx, e.g.:
+ *
+ *   import {
+ *     Area,
+ *     Bar,
+ *     BarChart,
+ *     CartesianGrid,
+ *     Cell,
+ *     ComposedChart,
+ *     Legend,        // <-- add this
+ *     Line,
+ *     Pie,
+ *     PieChart,
+ *     ResponsiveContainer,
+ *     Tooltip,
+ *     XAxis,
+ *     YAxis,
+ *   } from "recharts";
+ *
+ * Everything else (AXIS, tooltipStyle) is reused from the existing file.
+ */
+
+/**
+ * Pareto / 80-20 chart: bars ranked largest-first with a cumulative-%
+ * line on a secondary axis. Good for "which few things account for most
+ * of the total" — cost concentration, top offenders, etc.
+ */
+export function ParetoChart({
+  data,
+  height = 280,
+  color = "#7c3aed",
+}: {
+  data: { label: string; value: number }[];
+  height?: number;
+  color?: string;
+}) {
+  const sorted = [...data].sort((a, b) => b.value - a.value);
+  const total = sorted.reduce((s, d) => s + d.value, 0);
+  let running = 0;
+  const withCumulative = sorted.map((d) => {
+    running += d.value;
+    return { ...d, cumulativePct: total ? (running / total) * 100 : 0 };
+  });
+
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={withCumulative} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
+        <XAxis
+          dataKey="label"
+          tick={AXIS}
+          tickLine={false}
+          axisLine={false}
+          interval={0}
+          tickFormatter={(v: string) => (v.length > 10 ? `${v.slice(0, 9)}…` : v)}
+        />
+        <YAxis yAxisId="left" tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
+        <YAxis
+          yAxisId="right"
+          orientation="right"
+          domain={[0, 100]}
+          tick={AXIS}
+          tickLine={false}
+          axisLine={false}
+          width={40}
+          tickFormatter={(v: number) => `${v}%`}
+        />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          formatter={(v: number, name) =>
+            name === "cumulativePct" ? [`${v.toFixed(0)}%`, "Cumulative"] : [v, "Value"]
+          }
+        />
+        <Bar yAxisId="left" dataKey="value" fill={color} radius={[4, 4, 0, 0]} barSize={22} />
+        <Line yAxisId="right" type="monotone" dataKey="cumulativePct" stroke="#0f172a" strokeWidth={2} dot={{ r: 3 }} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+/**
+ * Stacked bars across a shared set of series keys per period — e.g.
+ * applications-by-coverage-type per month.
+ */
+export function StackedBarChart({
+  data,
+  keys,
+  colors,
+  height = 260,
+}: {
+  data: Record<string, string | number>[];
+  keys: string[];
+  colors: string[];
+  height?: number;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
+        <XAxis dataKey="period" tick={AXIS} tickLine={false} axisLine={false} minTickGap={24} />
+        <YAxis tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
+        <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#f8fafc" }} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        {keys.map((k, i) => (
+          <Bar
+            key={k}
+            dataKey={k}
+            stackId="stack"
+            fill={colors[i % colors.length]}
+            radius={i === keys.length - 1 ? [3, 3, 0, 0] : undefined}
+          />
+        ))}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+
