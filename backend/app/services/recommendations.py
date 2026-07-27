@@ -6,7 +6,9 @@ is raised — unless one is already open for that greenhouse + agent.
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+from datetime import datetime, timezone
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Disease, Pest, Recommendation, ScoutingRecord
@@ -36,6 +38,8 @@ async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
                 pest_id=rec.pest_id,
                 trigger_severity=rec.severity,
                 baseline_severity=rec.severity,
+                effective_threshold=resolved.threshold,
+                threshold_source=resolved.source,
                 note=f"{pest.name if pest else 'Pest'} {rec.severity} ≥ ETL {resolved.threshold}{scope}",
             )
         )
@@ -58,6 +62,8 @@ async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
                 disease_id=rec.disease_id,
                 trigger_severity=rec.severity,
                 baseline_severity=rec.severity,
+                effective_threshold=resolved.threshold,
+                threshold_source=resolved.source,
                 note=f"{disease.name if disease else 'Disease'} {rec.severity} ≥ ETL {resolved.threshold}{scope}",
             )
         )
@@ -82,3 +88,118 @@ async def _open_for(
     if disease_id is not None:
         q = q.where(Recommendation.disease_id == disease_id)
     return (await db.execute(q.limit(1))).first() is not None
+
+
+def _agent_filter(q, rec: Recommendation):
+    """Narrow a ScoutingRecord query to the same block + agent as ``rec``."""
+    q = q.where(ScoutingRecord.greenhouse_id == rec.greenhouse_id)
+    if rec.pest_id is not None:
+        return q.where(ScoutingRecord.pest_id == rec.pest_id)
+    if rec.disease_id is not None:
+        return q.where(ScoutingRecord.disease_id == rec.disease_id)
+    return q
+
+
+async def outcome(db: AsyncSession, rec: Recommendation) -> dict:
+    """Assess how the block has responded since this recommendation was raised.
+
+    ``latest_severity`` is the most recent reading of the same agent in the same
+    block; ``observations_since`` counts genuine re-scouts (after the rec)."""
+    resolved = await effective_threshold(
+        db, pest_id=rec.pest_id, disease_id=rec.disease_id, greenhouse_id=rec.greenhouse_id
+    )
+    latest = (
+        await db.execute(
+            _agent_filter(
+                select(ScoutingRecord.severity, ScoutingRecord.recorded_at), rec
+            ).order_by(ScoutingRecord.recorded_at.desc()).limit(1)
+        )
+    ).first()
+    since = (
+        await db.execute(
+            _agent_filter(select(func.count()).select_from(ScoutingRecord), rec).where(
+                ScoutingRecord.recorded_at > rec.created_at
+            )
+        )
+    ).scalar_one()
+
+    latest_sev = int(latest.severity) if latest else None
+    base = rec.baseline_severity
+    if latest_sev is None:
+        verdict = "no_data"
+    elif latest_sev < resolved.threshold:
+        verdict = "resolved_ready"
+    elif base is not None and latest_sev < base:
+        verdict = "recovering"
+    else:
+        verdict = "not_responding"
+
+    return {
+        "recommendation_id": rec.id,
+        "baseline_severity": base,
+        "latest_severity": latest_sev,
+        "latest_observed_at": latest.recorded_at if latest else None,
+        "observations_since": int(since or 0),
+        "effective_threshold": resolved.threshold,
+        "delta": (latest_sev - base) if (latest_sev is not None and base is not None) else None,
+        "verdict": verdict,
+    }
+
+
+async def evaluate_outcome(db: AsyncSession, entry: ScoutingRecord) -> bool:
+    """Auto-drive the loop from a re-scout:
+
+    * an **actioned** rec resolves if pressure fell below ETL, else records that
+      it's not responding;
+    * a **resolved** rec **reopens** if the same agent breaches ETL again — a
+      recurrence — so recurring problems don't silently disappear.
+    Either way the recommendation carries a reasoned outcome note."""
+    if entry.greenhouse_id is None or (entry.pest_id is None and entry.disease_id is None):
+        return False
+    q = select(Recommendation).where(
+        Recommendation.greenhouse_id == entry.greenhouse_id,
+        Recommendation.status.in_(["actioned", "resolved"]),
+    )
+    if entry.pest_id is not None:
+        q = q.where(Recommendation.pest_id == entry.pest_id)
+    else:
+        q = q.where(Recommendation.disease_id == entry.disease_id)
+    rec = (
+        await db.execute(q.order_by(Recommendation.created_at.desc()).limit(1))
+    ).scalar_one_or_none()
+    if rec is None:
+        return False
+
+    resolved = await effective_threshold(
+        db, pest_id=rec.pest_id, disease_id=rec.disease_id, greenhouse_id=rec.greenhouse_id
+    )
+
+    if rec.status == "actioned":
+        if entry.recorded_at <= rec.created_at:
+            return False
+        rec.post_severity = entry.severity
+        if entry.severity < resolved.threshold:
+            rec.status = "resolved"
+            rec.resolved_at = datetime.now(timezone.utc)
+            rec.outcome_note = (
+                f"Recovered — severity {entry.severity} < ETL {resolved.threshold} after intervention"
+            )
+        else:
+            rec.outcome_note = (
+                f"Not responding — severity {entry.severity} ≥ ETL {resolved.threshold} after intervention"
+            )
+        return True
+
+    # status == "resolved": watch for recurrence.
+    if rec.resolved_at is not None and entry.recorded_at <= rec.resolved_at:
+        return False
+    if entry.severity >= resolved.threshold:
+        rec.status = "open"
+        rec.resolved_at = None
+        rec.post_severity = entry.severity
+        rec.reopened_count = (rec.reopened_count or 0) + 1
+        rec.outcome_note = (
+            f"Recurrence — severity {entry.severity} ≥ ETL {resolved.threshold} returned after resolution"
+        )
+        return True
+    return False

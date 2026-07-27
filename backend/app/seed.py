@@ -9,7 +9,7 @@ import random
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .geo import centroid, coords_to_geometry, point_in_polygon
@@ -49,12 +49,14 @@ DISEASES = [
     ("Botrytis", 2),
     ("Black Spot", 3),
 ]
+# (name, product, WHO, RAC, active ingredient, target, REI hrs, price/L,
+#  rate/ha, water L/ha, PHI days)
 CHEMICALS = [
-    ("Abamectin 1.8EC", "Acaramik", "II", "6", "Abamectin", "Spider Mites", "12", 1800),
-    ("Spinetoram 120SC", "Radiant", "III", "5", "Spinetoram", "Thrips", "6", 3200),
-    ("Imidacloprid 200SL", "Confidor", "II", "4A", "Imidacloprid", "Whitefly", "12", 1500),
-    ("Azoxystrobin 250SC", "Ortiva", "U", "11", "Azoxystrobin", "Downy Mildew", "4", 2600),
-    ("Cyprodinil+Fludioxonil", "Switch", "U", "9+12", "Cyprodinil", "Botrytis", "8", 4100),
+    ("Abamectin 1.8EC", "Acaramik", "II", "6", "Abamectin", "Spider Mites", "12", 1800, 0.5, 1000, 7),
+    ("Spinetoram 120SC", "Radiant", "III", "5", "Spinetoram", "Thrips", "6", 3200, 0.4, 1000, 3),
+    ("Imidacloprid 200SL", "Confidor", "II", "4A", "Imidacloprid", "Whitefly", "12", 1500, 0.5, 800, 3),
+    ("Azoxystrobin 250SC", "Ortiva", "U", "11", "Azoxystrobin", "Downy Mildew", "4", 2600, 0.8, 1000, 7),
+    ("Cyprodinil+Fludioxonil", "Switch", "U", "9+12", "Cyprodinil", "Botrytis", "8", 4100, 1.0, 1000, 3),
 ]
 STAGES = ["Egg", "Larva", "Nymph", "Adult"]
 PLANT_LOC = ["Top", "Middle", "Bottom", "Bud", "Leaf underside"]
@@ -97,6 +99,14 @@ async def seed_if_empty(db: AsyncSession) -> bool:
     db.add_all(greenhouses)
     await db.flush()
 
+    # Block area (hectares) from the polygon — drives spray dosing later.
+    await db.execute(
+        text(
+            "UPDATE greenhouses "
+            "SET area_ha = ROUND((ST_Area(boundary::geography) / 10000.0)::numeric, 4)"
+        )
+    )
+
     # A few beds per greenhouse, spread across the footprint.
     rng = random.Random(42)
     for gh, ring in zip(greenhouses, GREENHOUSE_BOUNDARIES):
@@ -125,9 +135,12 @@ async def seed_if_empty(db: AsyncSession) -> bool:
             rei=rei,
             buying_price=price,
             type_of_application="Foliar",
-            rate="per label",
+            rate=f"{rate_ha}/ha",
+            rate_per_ha=rate_ha,
+            water_rate_l_per_ha=water_ha,
+            phi_days=phi,
         )
-        for name, product, who, rac, ai, target, rei, price in CHEMICALS
+        for name, product, who, rac, ai, target, rei, price, rate_ha, water_ha, phi in CHEMICALS
     ]
     db.add_all([*varieties, *pests, *diseases, *chemicals])
 

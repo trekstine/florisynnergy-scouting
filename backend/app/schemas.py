@@ -144,6 +144,7 @@ class PestUpdate(BaseModel):
     category: str | None = None
     threshold: int | None = Field(default=None, ge=1, le=5)
     is_active: bool | None = None
+    reason: str | None = None  # audit note for a threshold change
 
 
 class DiseaseCreate(BaseModel):
@@ -163,6 +164,7 @@ class DiseaseUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=150)
     threshold: int | None = Field(default=None, ge=1, le=5)
     is_active: bool | None = None
+    reason: str | None = None  # audit note for a threshold change
 
 
 # ───────── ETL override rules ─────────
@@ -186,6 +188,22 @@ class EtlRuleOut(BaseModel):
     threshold: int
     market: str | None
     reason: str | None
+    created_by: int | None
+    created_at: datetime
+
+
+class EtlAuditOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    employee_id: int | None
+    entity: str
+    entity_id: int | None
+    action: str
+    field: str | None
+    old_value: str | None
+    new_value: str | None
+    reason: str | None
+    summary: str | None
     created_at: datetime
 
 
@@ -326,6 +344,18 @@ class SprayFromRec(BaseModel):
     coverage: str | None = None
     comments: str | None = None
     start_date: date | None = None  # defaults to today
+    override: bool = False  # proceed despite a blocking compliance issue
+
+
+class ComplianceIssue(BaseModel):
+    level: Literal["block", "warn", "info"]
+    code: str
+    message: str
+
+
+class ComplianceResult(BaseModel):
+    issues: list[ComplianceIssue]
+    blocked: bool
 
 
 # ───────── Analytics ─────────
@@ -431,7 +461,11 @@ class RecommendationOut(BaseModel):
     trigger_severity: int
     baseline_severity: int | None
     post_severity: int | None
+    effective_threshold: int | None
+    threshold_source: str | None
     note: str | None
+    outcome_note: str | None
+    reopened_count: int
     created_at: datetime
     resolved_at: datetime | None
 
@@ -451,6 +485,14 @@ class RecommendationCreate(BaseModel):
     disease_id: int | None = None
     trigger_severity: int = 0
     note: str | None = None
+
+
+class RecommendationVerify(BaseModel):
+    note: str | None = None  # optional reasoned outcome
+
+
+class RecommendationReopen(BaseModel):
+    reason: str | None = None
 
 
 OutcomeVerdict = Literal[

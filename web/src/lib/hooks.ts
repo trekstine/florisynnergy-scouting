@@ -9,14 +9,18 @@ import type {
   BedPressure,
   BreakdownRow,
   Chemical,
+  ComplianceResult,
   Disease,
   Employee,
+  EtlAudit,
+  EtlRule,
   Filters,
   Greenhouse,
   GreenhousePressure,
   Pest,
   PestMatrixCell,
   Recommendation,
+  RecommendationOutcome,
   ScoutingRecord,
   ScoutSummary,
   SeverityBucket,
@@ -98,6 +102,48 @@ export function useCreateRef<T>(kind: "varieties" | "pests" | "diseases") {
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post<T>(`${V1}/${kind}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: [kind] }),
+  });
+}
+
+export function useUpdateRef<T>(kind: "pests" | "diseases") {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      api.patch<T>(`${V1}/${kind}/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [kind] });
+      qc.invalidateQueries({ queryKey: ["etl-rules"] });
+      qc.invalidateQueries({ queryKey: ["etl-audit"] });
+    },
+  });
+}
+
+// ── ETL override rules + governance history ──
+export const useEtlRules = () =>
+  useQuery({ queryKey: ["etl-rules"], queryFn: () => api.get<EtlRule[]>(`${V1}/etl-rules`) });
+
+export const useEtlAudit = () =>
+  useQuery({ queryKey: ["etl-audit"], queryFn: () => api.get<EtlAudit[]>(`${V1}/etl-rules/audit`) });
+
+export function useCreateEtlRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post<EtlRule>(`${V1}/etl-rules`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["etl-rules"] });
+      qc.invalidateQueries({ queryKey: ["etl-audit"] });
+    },
+  });
+}
+
+export function useDeleteEtlRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.del<void>(`${V1}/etl-rules/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["etl-rules"] });
+      qc.invalidateQueries({ queryKey: ["etl-audit"] });
+    },
   });
 }
 
@@ -233,5 +279,59 @@ export function useCreateRecommendation() {
       note?: string | null;
     }) => api.post<Recommendation>(`${V1}/recommendations`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["recommendations"] }),
+  });
+}
+
+export const useRecOutcomes = () =>
+  useQuery({
+    queryKey: ["rec-outcomes"],
+    queryFn: () => api.get<RecommendationOutcome[]>(`${V1}/recommendations/outcomes`),
+  });
+
+export const useCompliance = (recId: number, chemicalId: number | null | undefined) =>
+  useQuery({
+    queryKey: ["compliance", recId, chemicalId],
+    queryFn: () =>
+      api.get<ComplianceResult>(
+        `${V1}/recommendations/${recId}/compliance${chemicalId ? `?chemical_id=${chemicalId}` : ""}`,
+      ),
+    enabled: chemicalId != null,
+  });
+
+export function useVerifyRecommendation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.post<Recommendation>(`${V1}/recommendations/${id}/verify`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recommendations"] });
+      qc.invalidateQueries({ queryKey: ["rec-outcomes"] });
+    },
+  });
+}
+
+export function useReopenRecommendation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) =>
+      api.post<Recommendation>(`${V1}/recommendations/${id}/reopen`, reason ? { reason } : {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recommendations"] });
+      qc.invalidateQueries({ queryKey: ["rec-outcomes"] });
+    },
+  });
+}
+
+export function useSprayFromRecommendation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body?: Record<string, unknown> }) =>
+      api.post<SprayRecord>(`${V1}/recommendations/${id}/spray`, body ?? {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recommendations"] });
+      qc.invalidateQueries({ queryKey: ["rec-outcomes"] });
+      qc.invalidateQueries({ queryKey: ["spray"] });
+      qc.invalidateQueries({ queryKey: ["spray-cost"] });
+      qc.invalidateQueries({ queryKey: ["compliance"] });
+    },
   });
 }

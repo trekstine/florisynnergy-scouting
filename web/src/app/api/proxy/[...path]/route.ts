@@ -28,9 +28,13 @@ async function handle(
     method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
 
   const upstream = await fetch(target, { method, headers, body, cache: "no-store" });
-  const respBody = await upstream.arrayBuffer();
+  // 204/304 (and 1xx) are null-body statuses — constructing a Response with a
+  // body for them throws, which would turn a successful DELETE into a 500.
+  const status = upstream.status;
+  const nullBody = status === 204 || status === 304 || (status >= 100 && status < 200);
+  const respBody = nullBody ? null : await upstream.arrayBuffer();
   return new NextResponse(respBody, {
-    status: upstream.status,
+    status,
     headers: { "Content-Type": upstream.headers.get("content-type") ?? "application/json" },
   });
 }

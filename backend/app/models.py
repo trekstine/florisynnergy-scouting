@@ -367,7 +367,13 @@ class Recommendation(Base):
     trigger_severity: Mapped[int] = mapped_column(Integer, default=0)
     baseline_severity: Mapped[int | None] = mapped_column(Integer)
     post_severity: Mapped[int | None] = mapped_column(Integer)
+    # Explainability: the ETL that fired this, and which scope resolved it.
+    effective_threshold: Mapped[int | None] = mapped_column(Integer)
+    threshold_source: Mapped[str | None] = mapped_column(String(40))
     note: Mapped[str | None] = mapped_column(Text)
+    # Lifecycle: reasoned close-out + recurrence (reopen) tracking.
+    outcome_note: Mapped[str | None] = mapped_column(Text)
+    reopened_count: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -407,6 +413,33 @@ class EtlRule(Base):
     threshold: Mapped[int] = mapped_column(Integer, nullable=False)
     market: Mapped[str | None] = mapped_column(String(80))
     reason: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class EtlAudit(Base):
+    """Governance trail for economic-threshold changes — who changed what, when,
+    from which value to which, and (optionally) why. Covers both the base
+    pest/disease thresholds and the scoped override rules."""
+
+    __tablename__ = "etl_audit"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    entity: Mapped[str] = mapped_column(String(20), nullable=False)  # pest|disease|rule
+    entity_id: Mapped[int | None] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    field: Mapped[str | None] = mapped_column(String(40))
+    old_value: Mapped[str | None] = mapped_column(String(255))
+    new_value: Mapped[str | None] = mapped_column(String(255))
+    reason: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

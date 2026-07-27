@@ -19,7 +19,7 @@ from ..database import get_db
 from ..deps import get_current_employee
 from ..models import Employee, ScoutingRecord
 from ..schemas import BatchResult, ScoutingBatch, ScoutingOut
-from ..services.recommendations import evaluate_entry
+from ..services.recommendations import evaluate_entry, evaluate_outcome
 from ..services.validation import anomaly_check
 
 router = APIRouter(prefix="/scouting", tags=["scouting"])
@@ -134,6 +134,13 @@ async def submit_batch(
             async with db.begin_nested():
                 if await evaluate_entry(db, record):
                     recs_created += 1
+        except IntegrityError:
+            pass
+
+        # Re-scout → close the loop on any actioned recommendation for this block+agent.
+        try:
+            async with db.begin_nested():
+                await evaluate_outcome(db, record)
         except IntegrityError:
             pass
 

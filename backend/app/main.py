@@ -12,6 +12,7 @@ from .database import AsyncSessionLocal, Base, engine
 from .routers import (
     analytics,
     auth,
+    etl_rules,
     farms,
     recommendations,
     reference,
@@ -65,3 +66,4 @@ app.include_router(scouting.router, prefix=API_V1_PREFIX)
 app.include_router(spray.router, prefix=API_V1_PREFIX)
 app.include_router(analytics.router, prefix=API_V1_PREFIX)
 app.include_router(recommendations.router, prefix=API_V1_PREFIX)
+app.include_router(etl_rules.router, prefix=API_V1_PREFIX)

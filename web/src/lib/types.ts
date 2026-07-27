@@ -115,6 +115,7 @@ export interface ScoutingRecord {
 export interface SprayRecord {
   id: number;
   program_id: string | null;
+  recommendation_id: number | null;
   greenhouse_id: number | null;
   bed_code: string | null;
   variety_code: string | null;
@@ -124,8 +125,67 @@ export interface SprayRecord {
   who_class: string | null;
   qty: number | null;
   cost_of_chemical: number | null;
+  phi_days: number | null;
+  safe_harvest_date: string | null;
   start_date: string | null;
   recorded_at: string;
+}
+
+export type OutcomeVerdict =
+  | "no_data"
+  | "resolved_ready"
+  | "recovering"
+  | "not_responding";
+
+export interface RecommendationOutcome {
+  recommendation_id: number;
+  baseline_severity: number | null;
+  latest_severity: number | null;
+  latest_observed_at: string | null;
+  observations_since: number;
+  effective_threshold: number;
+  delta: number | null;
+  verdict: OutcomeVerdict;
+}
+
+export interface EtlRule {
+  id: number;
+  pest_id: number | null;
+  disease_id: number | null;
+  variety_id: number | null;
+  greenhouse_id: number | null;
+  threshold: number;
+  market: string | null;
+  reason: string | null;
+  created_by: number | null;
+  created_at: string;
+}
+
+export type ComplianceLevel = "block" | "warn" | "info";
+
+export interface ComplianceIssue {
+  level: ComplianceLevel;
+  code: string;
+  message: string;
+}
+
+export interface ComplianceResult {
+  issues: ComplianceIssue[];
+  blocked: boolean;
+}
+
+export interface EtlAudit {
+  id: number;
+  employee_id: number | null;
+  entity: "pest" | "disease" | "rule";
+  entity_id: number | null;
+  action: string;
+  field: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  reason: string | null;
+  summary: string | null;
+  created_at: string;
 }
 
 export interface GreenhousePressure {
@@ -228,7 +288,11 @@ export interface Recommendation {
   trigger_severity: number;
   baseline_severity: number | null;
   post_severity: number | null;
+  effective_threshold: number | null;
+  threshold_source: string | null;
   note: string | null;
+  outcome_note: string | null;
+  reopened_count: number;
   created_at: string;
   resolved_at: string | null;
 }

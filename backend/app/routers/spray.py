@@ -1,6 +1,8 @@
 """Spray capture — idempotent batch submit (a program = many products)."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -60,9 +62,16 @@ async def submit_spray_batch(
 
         # Denormalise chemical detail onto the record for fast reporting.
         chem = await db.get(Chemical, e.chemical_id) if e.chemical_id else None
+        phi = chem.phi_days if chem else None
+        safe_harvest = (
+            e.start_date + timedelta(days=phi)
+            if phi is not None and e.start_date is not None
+            else None
+        )
         record = SprayRecord(
             client_record_id=cid,
             program_id=payload.program_id,
+            recommendation_id=e.recommendation_id,
             greenhouse_id=e.greenhouse_id,
             bed_code=e.bed_code,
             variety_code=e.variety_code,
@@ -83,6 +92,8 @@ async def submit_spray_batch(
             qty=e.qty,
             buying_price=e.buying_price if e.buying_price is not None else (float(chem.buying_price) if chem and chem.buying_price is not None else None),
             cost_of_chemical=e.cost_of_chemical,
+            phi_days=phi,
+            safe_harvest_date=safe_harvest,
             comments=e.comments,
             start_date=e.start_date,
             start_time=e.start_time,
