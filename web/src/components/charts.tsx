@@ -182,3 +182,66 @@ export function HeatMatrix({
     </div>
   );
 }
+
+/**
+ * Add these two exports to components/charts.tsx (alongside the existing
+ * TrendChart / HBarChart / SeverityHistogram / Donut / HeatMatrix).
+ * They reuse the same recharts imports and AXIS/tooltipStyle constants
+ * already defined at the top of that file — no new imports needed.
+ */
+
+/** Applications (bar) + cost (line) per period — for the Spray Overview report. */
+export function SprayTimingChart({
+  data,
+  height = 260,
+}: {
+  data: { period: string; applications: number; cost: number }[];
+  height?: number;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
+        <XAxis dataKey="period" tick={AXIS} tickLine={false} axisLine={false} minTickGap={24} />
+        <YAxis yAxisId="left" tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
+        <YAxis yAxisId="right" orientation="right" tick={AXIS} tickLine={false} axisLine={false} width={52} />
+        <Tooltip
+          contentStyle={tooltipStyle}
+          formatter={(v: number, name) => [
+            name === "cost" ? `$${v.toFixed(2)}` : v,
+            name === "cost" ? "Cost" : "Applications",
+          ]}
+        />
+        <Bar yAxisId="left" dataKey="applications" fill="#0ea5e9" radius={[2, 2, 0, 0]} barSize={14} />
+        <Line yAxisId="right" type="monotone" dataKey="cost" stroke="#dc2626" strokeWidth={2} dot={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Single-metric cost trend (area) — for the Cost report. */
+export function CostTrendChart({
+  data,
+  height = 260,
+}: {
+  data: { period: string; cost: number }[];
+  height?: number;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+        <defs>
+          <linearGradient id="costFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#059669" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="#059669" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
+        <XAxis dataKey="period" tick={AXIS} tickLine={false} axisLine={false} minTickGap={24} />
+        <YAxis tick={AXIS} tickLine={false} axisLine={false} tickFormatter={(v: number) => `$${v}`} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`$${v.toFixed(2)}`, "Cost"]} />
+        <Area type="monotone" dataKey="cost" stroke="#059669" strokeWidth={2} fill="url(#costFill)" />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
