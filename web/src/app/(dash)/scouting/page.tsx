@@ -14,7 +14,15 @@ import {
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-import { Badge, Button, Card, EmptyState, PageHeader, Select, Spinner } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  PageHeader,
+  Select,
+  Spinner,
+} from "@/components/ui";
 import {
   REC_STATUS_HEX,
   REC_STATUS_LABEL,
@@ -148,7 +156,8 @@ export default function ScoutingPage() {
       const k = keyOf(rc);
       if (!k) continue;
       if (!any.has(k)) any.set(k, rc);
-      if ((rc.status === "open" || rc.status === "planned") && !open.has(k)) open.set(k, rc);
+      if ((rc.status === "open" || rc.status === "planned") && !open.has(k))
+        open.set(k, rc);
     }
     return { openRecByKey: open, anyRecByKey: any };
   }, [recs.data]);
@@ -169,14 +178,18 @@ export default function ScoutingPage() {
       const target = isDisease
         ? (disease?.name ?? "Disease")
         : (pest?.name ?? (r.pest_id ? `#${r.pest_id}` : "—"));
-      const threshold = isDisease ? (disease?.threshold ?? null) : (pest?.threshold ?? null);
+      const threshold = isDisease
+        ? (disease?.threshold ?? null)
+        : (pest?.threshold ?? null);
       const overEtl =
         threshold != null &&
         r.severity >= threshold &&
         r.severity > 0 &&
         (r.pest_id != null || r.disease_id != null);
       const key = keyOf(r);
-      const rec = key ? (openRecByKey.get(key) ?? anyRecByKey.get(key)) : undefined;
+      const rec = key
+        ? (openRecByKey.get(key) ?? anyRecByKey.get(key))
+        : undefined;
       return {
         r,
         isDisease,
@@ -186,15 +199,28 @@ export default function ScoutingPage() {
         rec,
         unverified: !isVerified(r.verification_method),
         photoMissing: !r.image_url,
-        ghLabel: r.greenhouse_id ? (ghName.get(r.greenhouse_id) ?? `#${r.greenhouse_id}`) : "—",
-        scoutLabel: r.scout_id ? (scoutName.get(r.scout_id) ?? `#${r.scout_id}`) : "—",
+        ghLabel: r.greenhouse_id
+          ? (ghName.get(r.greenhouse_id) ?? `#${r.greenhouse_id}`)
+          : "—",
+        scoutLabel: r.scout_id
+          ? (scoutName.get(r.scout_id) ?? `#${r.scout_id}`)
+          : "—",
         varietyLabel: r.variety_code
           ? (varietyByCode.get(r.variety_code) ?? r.variety_code)
           : "—",
         pestCount: r.fcm_count + r.sticky_trap_bug_count + r.lure_bug_count,
       };
     });
-  }, [scouting.data, pestById, diseaseById, ghName, scoutName, varietyByCode, openRecByKey, anyRecByKey]);
+  }, [
+    scouting.data,
+    pestById,
+    diseaseById,
+    ghName,
+    scoutName,
+    varietyByCode,
+    openRecByKey,
+    anyRecByKey,
+  ]);
 
   const sorted = useMemo(() => {
     const copy = [...rows];
@@ -223,7 +249,8 @@ export default function ScoutingPage() {
   // ── Coverage (greenhouses scouted in the selected window) ──
   const coverage = useMemo(() => {
     const scouted = new Set<number>();
-    for (const x of rows) if (x.r.greenhouse_id != null) scouted.add(x.r.greenhouse_id);
+    for (const x of rows)
+      if (x.r.greenhouse_id != null) scouted.add(x.r.greenhouse_id);
     const all = [...(greenhouses.data ?? [])].sort((a, b) => a.id - b.id);
     return { all, scouted, overdue: all.length - scouted.size };
   }, [rows, greenhouses.data]);
@@ -235,19 +262,43 @@ export default function ScoutingPage() {
 
   function exportCsv() {
     const head = [
-      "recorded_at", "greenhouse", "bed", "type", "target", "variety",
-      "severity", "etl", "over_etl", "verification", "scout", "flagged", "notes",
+      "recorded_at",
+      "greenhouse",
+      "bed",
+      "type",
+      "target",
+      "variety",
+      "severity",
+      "etl",
+      "over_etl",
+      "verification",
+      "scout",
+      "flagged",
+      "notes",
     ];
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = sorted.map((x) =>
       [
-        x.r.recorded_at, x.ghLabel, x.r.bed_code ?? "", SCOUTING_LABEL[x.r.scouting_for],
-        x.target, x.varietyLabel, x.r.severity, x.threshold ?? "", x.overEtl ? "yes" : "no",
-        VERIFICATION_LABEL[x.r.verification_method], x.scoutLabel, x.r.flagged ? "yes" : "no",
+        x.r.recorded_at,
+        x.ghLabel,
+        x.r.bed_code ?? "",
+        SCOUTING_LABEL[x.r.scouting_for],
+        x.target,
+        x.varietyLabel,
+        x.r.severity,
+        x.threshold ?? "",
+        x.overEtl ? "yes" : "no",
+        VERIFICATION_LABEL[x.r.verification_method],
+        x.scoutLabel,
+        x.r.flagged ? "yes" : "no",
         x.r.notes ?? "",
-      ].map(esc).join(","),
+      ]
+        .map(esc)
+        .join(","),
     );
-    const blob = new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" });
+    const blob = new Blob([[head.join(","), ...lines].join("\n")], {
+      type: "text/csv",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -288,22 +339,42 @@ export default function ScoutingPage() {
             </button>
           ))}
         </div>
-        <Select value={gh} onChange={(e) => setGh(e.target.value)} className="max-w-[190px]">
+        <Select
+          value={gh}
+          onChange={(e) => setGh(e.target.value)}
+          className="max-w-[190px]"
+        >
           <option value="">All greenhouses</option>
           {(greenhouses.data ?? []).map((g) => (
-            <option key={g.id} value={g.id}>{g.name}</option>
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
           ))}
         </Select>
-        <Select value={kind} onChange={(e) => setKind(e.target.value)} className="max-w-[160px]">
+        <Select
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          className="max-w-[160px]"
+        >
           <option value="">All types</option>
-          {(["disease", "pest", "lure", "sticky_trap"] as ScoutingFor[]).map((k) => (
-            <option key={k} value={k}>{SCOUTING_LABEL[k]}</option>
-          ))}
+          {(["disease", "pest", "lure", "sticky_trap"] as ScoutingFor[]).map(
+            (k) => (
+              <option key={k} value={k}>
+                {SCOUTING_LABEL[k]}
+              </option>
+            ),
+          )}
         </Select>
-        <Select value={scoutId} onChange={(e) => setScoutId(e.target.value)} className="max-w-[160px]">
+        <Select
+          value={scoutId}
+          onChange={(e) => setScoutId(e.target.value)}
+          className="max-w-[160px]"
+        >
           <option value="">All scouts</option>
           {scouts.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
           ))}
         </Select>
         {scouting.isFetching && <Spinner label="" />}
@@ -312,8 +383,16 @@ export default function ScoutingPage() {
       {/* Summary strip */}
       <div className="grid grid-cols-2 gap-3 px-6 md:grid-cols-4">
         <Metric label={`Records ${rangeNoun}`.trim()} value={summary.n} />
-        <Metric label="Over ETL" value={summary.overEtl} tone={summary.overEtl ? "#dc2626" : undefined} />
-        <Metric label="Unverified" value={summary.unverified} tone={summary.unverified ? "#f59e0b" : undefined} />
+        <Metric
+          label="Over ETL"
+          value={summary.overEtl}
+          tone={summary.overEtl ? "#dc2626" : undefined}
+        />
+        <Metric
+          label="Unverified"
+          value={summary.unverified}
+          tone={summary.unverified ? "#f59e0b" : undefined}
+        />
         <Metric label="Avg severity" value={summary.avg.toFixed(1)} />
       </div>
 
@@ -321,9 +400,12 @@ export default function ScoutingPage() {
       <div className="px-6">
         <Card className="p-5">
           <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-sm font-semibold text-ink">Coverage {rangeNoun}</span>
+            <span className="text-sm font-semibold text-ink">
+              Coverage {rangeNoun}
+            </span>
             <span className="text-sm text-ink-faint">
-              {coverage.scouted.size} of {coverage.all.length} greenhouses scouted
+              {coverage.scouted.size} of {coverage.all.length} greenhouses
+              scouted
             </span>
             {coverage.overdue > 0 && (
               <span className="ml-auto text-sm font-semibold text-red-600">
@@ -352,10 +434,14 @@ export default function ScoutingPage() {
           {scoutSummary.data && scoutSummary.data.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-3">
               {scoutSummary.data.map((s) => (
-                <div key={s.scout_id} className="rounded-lg border border-line bg-surface px-3 py-1.5">
+                <div
+                  key={s.scout_id}
+                  className="rounded-lg border border-line bg-surface px-3 py-1.5"
+                >
                   <div className="text-sm font-semibold text-ink">{s.name}</div>
                   <div className="text-xs text-ink-faint">
-                    {s.records} records · {s.greenhouses_visited} GH · {relativeTime(s.last_seen)}
+                    {s.records} records · {s.greenhouses_visited} GH ·{" "}
+                    {relativeTime(s.last_seen)}
                   </div>
                 </div>
               ))}
@@ -376,21 +462,30 @@ export default function ScoutingPage() {
                   onClick={() => setSort(s)}
                   className={
                     "rounded-md px-2.5 py-1 text-xs font-semibold capitalize transition-colors " +
-                    (sort === s ? "bg-brand-600 text-white" : "text-ink-soft hover:bg-surface")
+                    (sort === s
+                      ? "bg-brand-600 text-white"
+                      : "text-ink-soft hover:bg-surface")
                   }
                 >
                   {s === "pressure" ? "By pressure" : "Most recent"}
                 </button>
               ))}
             </div>
-            <span className="ml-auto text-sm text-ink-faint">{sorted.length} records</span>
+            <span className="ml-auto text-sm text-ink-faint">
+              {sorted.length} records
+            </span>
           </div>
 
           {loading ? (
-            <div className="px-5 py-8"><Spinner /></div>
+            <div className="px-5 py-8">
+              <Spinner />
+            </div>
           ) : sorted.length === 0 ? (
             <div className="p-5">
-              <EmptyState>No scouting matches these filters. Widen the date range or clear a filter.</EmptyState>
+              <EmptyState>
+                No scouting matches these filters. Widen the date range or clear
+                a filter.
+              </EmptyState>
             </div>
           ) : (
             <ul className="divide-y divide-line">
@@ -402,7 +497,10 @@ export default function ScoutingPage() {
                   >
                     <span
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold"
-                      style={{ backgroundColor: `${severityHex(x.r.severity)}33`, color: "#0f172a" }}
+                      style={{
+                        backgroundColor: `${severityHex(x.r.severity)}33`,
+                        color: "#0f172a",
+                      }}
                     >
                       {x.r.severity}
                     </span>
@@ -411,16 +509,21 @@ export default function ScoutingPage() {
                         {x.ghLabel} · {x.r.bed_code ?? "—"} · {x.target}
                       </span>
                       <span className="mt-0.5 block truncate text-xs text-ink-faint">
-                        {SCOUTING_LABEL[x.r.scouting_for]} · {x.varietyLabel} · {x.scoutLabel} ·{" "}
+                        {SCOUTING_LABEL[x.r.scouting_for]} · {x.varietyLabel} ·{" "}
+                        {x.scoutLabel} · {x.r.stage ?? "stage n/a"} ·{" "}
                         {formatDateTime(x.r.recorded_at)}
                       </span>
                     </span>
                     <span className="hidden shrink-0 items-center gap-1.5 sm:flex">
                       {x.overEtl && <Badge color="#dc2626">Over ETL</Badge>}
                       {x.r.flagged && <Badge color="#dc2626">Anomaly</Badge>}
-                      {x.unverified && <Badge color="#f59e0b">Unverified</Badge>}
+                      {x.unverified && (
+                        <Badge color="#f59e0b">Unverified</Badge>
+                      )}
                       {x.rec && !x.overEtl && (
-                        <Badge color={REC_STATUS_HEX[x.rec.status]}>{REC_STATUS_LABEL[x.rec.status]}</Badge>
+                        <Badge color={REC_STATUS_HEX[x.rec.status]}>
+                          {REC_STATUS_LABEL[x.rec.status]}
+                        </Badge>
                       )}
                     </span>
                   </button>
@@ -451,18 +554,35 @@ export default function ScoutingPage() {
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: number | string; tone?: string }) {
+function Metric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  tone?: string;
+}) {
   return (
     <div className="rounded-xl border border-line bg-white p-4 shadow-card">
       <div className="text-xs font-semibold text-ink-faint">{label}</div>
-      <div className="mt-1 text-2xl font-bold tabular-nums" style={tone ? { color: tone } : undefined}>
+      <div
+        className="mt-1 text-2xl font-bold tabular-nums"
+        style={tone ? { color: tone } : undefined}
+      >
         {value}
       </div>
     </div>
   );
 }
 
-function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
+function DetailField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div>
       <div className="text-xs text-ink-faint">{label}</div>
@@ -520,7 +640,11 @@ function RecordDetail({
               {SCOUTING_LABEL[r.scouting_for]} · {row.target}
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-ink-faint hover:bg-surface" aria-label="Close">
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-ink-faint hover:bg-surface"
+            aria-label="Close"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -530,11 +654,16 @@ function RecordDetail({
           <div className="flex flex-wrap items-center gap-2">
             <span
               className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-bold"
-              style={{ backgroundColor: `${severityHex(r.severity)}33`, color: "#0f172a" }}
+              style={{
+                backgroundColor: `${severityHex(r.severity)}33`,
+                color: "#0f172a",
+              }}
             >
               Severity {r.severity}
               {row.threshold != null && (
-                <span className="font-medium text-ink-faint">/ ETL {row.threshold}</span>
+                <span className="font-medium text-ink-faint">
+                  / ETL {row.threshold}
+                </span>
               )}
             </span>
             {row.overEtl && <Badge color="#dc2626">Over ETL</Badge>}
@@ -545,7 +674,8 @@ function RecordDetail({
               </Badge>
             ) : (
               <Badge color="#10b981">
-                <ShieldCheck className="h-3 w-3" /> {VERIFICATION_LABEL[r.verification_method]}
+                <ShieldCheck className="h-3 w-3" />{" "}
+                {VERIFICATION_LABEL[r.verification_method]}
               </Badge>
             )}
           </div>
@@ -560,7 +690,11 @@ function RecordDetail({
           {/* Photo */}
           {r.image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={r.image_url} alt="Field capture" className="w-full rounded-lg border border-line object-cover" />
+            <img
+              src={r.image_url}
+              alt="Field capture"
+              className="w-full rounded-lg border border-line object-cover"
+            />
           ) : (
             <div className="flex h-28 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line bg-surface text-ink-faint">
               <Camera className="h-6 w-6" />
@@ -573,9 +707,24 @@ function RecordDetail({
             <DetailField label="Variety">{row.varietyLabel}</DetailField>
             <DetailField label="Scout">{row.scoutLabel}</DetailField>
             <DetailField label="Stage">{r.stage ?? "—"}</DetailField>
-            <DetailField label="On plant">{r.location_on_plant ?? "—"}</DetailField>
-            <DetailField label="Recorded">{formatDateTime(r.recorded_at)}</DetailField>
-            <DetailField label="Verification">{VERIFICATION_LABEL[r.verification_method]}</DetailField>
+            <DetailField label="On plant">
+              {r.location_on_plant ?? "—"}
+            </DetailField>
+            <DetailField label="Recorded">
+              {formatDateTime(r.recorded_at)}
+            </DetailField>
+            <DetailField label="Verification">
+              {VERIFICATION_LABEL[r.verification_method]}
+            </DetailField>
+            <DetailField label="Variety code">
+              {r.variety_code ?? "—"}
+            </DetailField>
+            <DetailField label="Counts">
+              {r.fcm_count +
+                r.sticky_trap_bug_count +
+                r.lure_bug_count +
+                r.beneficials_count}
+            </DetailField>
           </div>
 
           {/* Counts */}
@@ -622,10 +771,16 @@ function RecordDetail({
             {row.rec ? (
               <div className="rounded-lg border border-line bg-surface p-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-ink">Recommendation #{row.rec.id}</span>
-                  <Badge color={REC_STATUS_HEX[row.rec.status]}>{REC_STATUS_LABEL[row.rec.status]}</Badge>
+                  <span className="text-sm font-semibold text-ink">
+                    Recommendation #{row.rec.id}
+                  </span>
+                  <Badge color={REC_STATUS_HEX[row.rec.status]}>
+                    {REC_STATUS_LABEL[row.rec.status]}
+                  </Badge>
                 </div>
-                {row.rec.note && <p className="mt-1 text-sm text-ink-soft">{row.rec.note}</p>}
+                {row.rec.note && (
+                  <p className="mt-1 text-sm text-ink-soft">{row.rec.note}</p>
+                )}
                 <Link
                   href="/recommendations"
                   className="mt-2 inline-block text-sm font-semibold text-brand-600 hover:underline"
@@ -638,8 +793,18 @@ function RecordDetail({
                 <p className="text-sm font-medium text-red-700">
                   Over ETL with no open recommendation.
                 </p>
-                <Button className="mt-2" onClick={onCreateRec} disabled={creating}>
-                  {creating ? "Creating…" : (<><Check className="h-4 w-4" /> Create recommendation</>)}
+                <Button
+                  className="mt-2"
+                  onClick={onCreateRec}
+                  disabled={creating}
+                >
+                  {creating ? (
+                    "Creating…"
+                  ) : (
+                    <>
+                      <Check className="h-4 w-4" /> Create recommendation
+                    </>
+                  )}
                 </Button>
               </div>
             ) : (
