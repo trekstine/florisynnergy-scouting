@@ -25,6 +25,8 @@ import type {
   ScoutSummary,
   SeverityBucket,
   SprayCostRow,
+  SprayPreview,
+  SprayProgramResult,
   SprayRecord,
   TrendPoint,
   Variety,
@@ -209,8 +211,12 @@ export const useScouting = (params?: {
   });
 };
 
-export const useSpray = () =>
-  useQuery({ queryKey: ["spray"], queryFn: () => api.get<SprayRecord[]>(`${V1}/spray`) });
+/** `limit` counts product rows, not programs — a 3-product program is 3 rows. */
+export const useSpray = (limit = 200) =>
+  useQuery({
+    queryKey: ["spray", limit],
+    queryFn: () => api.get<SprayRecord[]>(`${V1}/spray?limit=${limit}`),
+  });
 
 // ── Analytics (filter-aware) ──
 export const useSummary = (f: Filters) =>
@@ -335,6 +341,47 @@ export function useReopenRecommendation() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["recommendations"] });
       qc.invalidateQueries({ queryKey: ["rec-outcomes"] });
+    },
+  });
+}
+
+/** Ask the server what a product would cost and constrain, without saving. */
+export function useSprayPreview() {
+  return useMutation({
+    mutationFn: (body: {
+      chemical_id: number;
+      greenhouse_id?: number | null;
+      bed_code?: string | null;
+      variety_code?: string | null;
+      coverage?: string | null;
+      start_date?: string | null;
+      pest_id?: number | null;
+      disease_id?: number | null;
+    }) => api.post<SprayPreview>(`${V1}/spray/preview`, body),
+  });
+}
+
+/** Commit a reviewed multi-product program as one application event. */
+export function useCreateSprayProgram() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      greenhouse_id?: number | null;
+      bed_code?: string | null;
+      variety_code?: string | null;
+      coverage?: string | null;
+      comments?: string | null;
+      start_date?: string | null;
+      recommendation_id?: number | null;
+      items: { chemical_id: number }[];
+      override?: boolean;
+    }) => api.post<SprayProgramResult>(`${V1}/spray/program`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recommendations"] });
+      qc.invalidateQueries({ queryKey: ["rec-outcomes"] });
+      qc.invalidateQueries({ queryKey: ["spray"] });
+      qc.invalidateQueries({ queryKey: ["spray-cost"] });
+      qc.invalidateQueries({ queryKey: ["compliance"] });
     },
   });
 }

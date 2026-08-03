@@ -208,6 +208,43 @@ export interface PestMatrixCell {
   avg_severity: number;
 }
 
+export interface ComplianceIssue {
+  level: "block" | "warn" | "info";
+  code: string;
+  message: string;
+}
+
+/** What one product would cost and constrain — computed server-side, not saved. */
+export interface SprayPreview {
+  chemical_id: number;
+  name: string;
+  product: string | null;
+  type_of_application: string | null;
+  rate: string | null;
+  area_ha: number | null;
+  qty: number | null;
+  volume_of_water: string | null;
+  buying_price: number | null;
+  cost_of_chemical: number | null;
+  who_class: string | null;
+  rac_code: string | null;
+  active_ingredient1: string | null;
+  target1: string | null;
+  target2: string | null;
+  rei: string | null;
+  phi_days: number | null;
+  safe_harvest_date: string | null;
+  issues: ComplianceIssue[];
+  blocked: boolean;
+}
+
+export interface SprayProgramResult {
+  program_id: string;
+  records: SprayRecord[];
+  total_cost: number;
+  safe_harvest_date: string | null;
+}
+
 export interface ScoutSummary {
   scout_id: number;
   name: string;

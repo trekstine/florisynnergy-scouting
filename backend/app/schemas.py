@@ -351,6 +351,7 @@ class SprayFromRec(BaseModel):
     override: bool = False  # proceed despite a blocking compliance issue
 
 
+# ───────── Compliance ─────────
 class ComplianceIssue(BaseModel):
     level: Literal["block", "warn", "info"]
     code: str
@@ -360,6 +361,73 @@ class ComplianceIssue(BaseModel):
 class ComplianceResult(BaseModel):
     issues: list[ComplianceIssue]
     blocked: bool
+
+
+# ───────── Spray program builder ─────────
+class SprayPreviewRequest(BaseModel):
+    """Ask the server what a product would cost and constrain, without saving.
+
+    The dosing maths (rate × block hectares), PHI arithmetic and compliance
+    checks all live server-side; this lets the UI show them *before* anyone
+    commits, instead of composing a record invisibly on submit.
+    """
+
+    chemical_id: int
+    greenhouse_id: int | None = None
+    bed_code: str | None = None
+    variety_code: str | None = None
+    coverage: str | None = None
+    start_date: date | None = None
+    pest_id: int | None = None
+    disease_id: int | None = None
+
+
+class SprayPreviewOut(BaseModel):
+    chemical_id: int
+    name: str
+    product: str | None
+    type_of_application: str | None
+    rate: str | None
+    area_ha: float | None
+    qty: float | None
+    volume_of_water: str | None
+    buying_price: float | None
+    cost_of_chemical: float | None
+    who_class: str | None
+    rac_code: str | None
+    active_ingredient1: str | None
+    target1: str | None
+    target2: str | None
+    rei: str | None
+    phi_days: int | None
+    safe_harvest_date: date | None
+    issues: list[ComplianceIssue]
+    blocked: bool
+
+
+class SprayProgramItem(BaseModel):
+    chemical_id: int
+
+
+class SprayProgramCreate(BaseModel):
+    """One application event spanning one or more tank-mixed products."""
+
+    greenhouse_id: int | None = None
+    bed_code: str | None = None
+    variety_code: str | None = None
+    coverage: str | None = None
+    comments: str | None = None
+    start_date: date | None = None
+    recommendation_id: int | None = None
+    items: list[SprayProgramItem] = Field(min_length=1)
+    override: bool = False
+
+
+class SprayProgramOut(BaseModel):
+    program_id: str
+    records: list[SprayOut]
+    total_cost: float
+    safe_harvest_date: date | None
 
 
 # ───────── Analytics ─────────

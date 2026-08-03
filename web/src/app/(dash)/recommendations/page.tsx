@@ -1,8 +1,9 @@
 "use client";
 
 import { ArrowDownRight, ArrowUpRight, Beaker, CheckCircle2, RotateCcw, ShieldAlert } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
+import { SprayProgramBuilder } from "@/components/SprayProgramBuilder";
 import { Badge, PageHeader, Select, Spinner } from "@/components/ui";
 import { REC_STATUS_HEX, REC_STATUS_LABEL, relativeTime } from "@/lib/format";
 import {
@@ -12,7 +13,6 @@ import {
   useRecommendations,
   useRecOutcomes,
   useReopenRecommendation,
-  useSprayFromRecommendation,
   useUpdateRecommendation,
   useVerifyRecommendation,
 } from "@/lib/hooks";
@@ -131,9 +131,9 @@ function RecCard({
 }) {
   const update = useUpdateRecommendation();
   const verify = useVerifyRecommendation();
-  const spray = useSprayFromRecommendation();
   const reopen = useReopenRecommendation();
   const compliance = useCompliance(r.id, r.recommended_chemical_id);
+  const [builderOpen, setBuilderOpen] = useState(false);
 
   const comp = compliance.data;
   const isBlocked = comp?.blocked ?? false;
@@ -206,25 +206,45 @@ function RecCard({
             </ul>
           )}
 
-          {isBlocked ? (
-            <button
-              onClick={() => spray.mutate({ id: r.id, body: { override: true } })}
-              disabled={spray.isPending}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-xs font-semibold text-white hover:brightness-95 disabled:opacity-40"
-              style={{ backgroundColor: "#dc2626" }}
-            >
-              <ShieldAlert className="h-3.5 w-3.5" /> Override &amp; generate
-            </button>
-          ) : (
-            <button
-              onClick={() => spray.mutate({ id: r.id, body: {} })}
-              disabled={!r.recommended_chemical_id || spray.isPending}
-              title={r.recommended_chemical_id ? undefined : "Assign a chemical first"}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Beaker className="h-3.5 w-3.5" /> Generate spray program
-            </button>
-          )}
+          {/* Opens the builder pre-filled from this recommendation — the ETL
+              engine suggests, the manager reviews dosing/cost/PHI, then
+              commits. Nothing is written before that. */}
+          <button
+            onClick={() => setBuilderOpen(true)}
+            className={
+              "flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors " +
+              (isBlocked
+                ? "bg-red-600 hover:bg-red-700"
+                : "bg-brand-600 hover:bg-brand-700")
+            }
+          >
+            {isBlocked ? (
+              <>
+                <ShieldAlert className="h-3.5 w-3.5" /> Review &amp; plan spray
+              </>
+            ) : (
+              <>
+                <Beaker className="h-3.5 w-3.5" /> Plan spray program
+              </>
+            )}
+          </button>
+
+          <SprayProgramBuilder
+            open={builderOpen}
+            onClose={() => setBuilderOpen(false)}
+            context={{
+              greenhouseId: r.greenhouse_id,
+              greenhouseLabel: r.greenhouse_id
+                ? (ghName.get(r.greenhouse_id) ?? `GH #${r.greenhouse_id}`)
+                : "—",
+              bedCode: r.bed_code,
+              recommendationId: r.id,
+              targetLabel: r.note ?? undefined,
+              pestId: r.pest_id,
+              diseaseId: r.disease_id,
+              suggestedChemicalId: r.recommended_chemical_id,
+            }}
+          />
 
           {oc && oc.latest_severity != null && (
             <button
