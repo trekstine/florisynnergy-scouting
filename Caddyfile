@@ -1,0 +1,20 @@
+# Public entrypoint: terminates TLS (auto Let's Encrypt).
+#   /api/v1/* , /health , /media/*  →  FastAPI (mobile app + photos)
+#   everything else                 →  Next.js portal
+# Postgres is never exposed publicly.
+{$DOMAIN} {
+	encode gzip
+
+	handle /api/v1/* {
+		reverse_proxy api:8000
+	}
+	handle /health {
+		reverse_proxy api:8000
+	}
+	handle /media/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}
