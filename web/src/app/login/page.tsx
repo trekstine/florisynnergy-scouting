@@ -1,137 +1,180 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
 import { Logo, LogoMark } from "@/components/Logo";
 import { ErrorBox } from "@/components/ui";
 
-/* ────────────────────────────────────────────────────────────────────────
-   Brand canvas: a stylised live view of the farm — greenhouse beds that
-   breathe with pest pressure, swept by a geofence radar, with pollen
-   drifting up the panel. The product's own visual language as artwork.
+/* ─────────────────────────────────────────────────────────────────────────
+   Split card floating on an organic background, with a flat-vector rose-farm
+   scene on the green panel: polytunnel greenhouses on rolling hills, drifting
+   clouds, and rows of roses in the farm's own variety colours.
 
-   Deterministic by design: no Math.random and no Date at render time, so
-   server and client markup match and nothing hydrates twice.
-   ──────────────────────────────────────────────────────────────────────── */
+   Hand-built SVG — no external assets, and every position is hardcoded, so
+   server and client markup always match.
+   ───────────────────────────────────────────────────────────────────────── */
 
-const COLS = 9;
-const ROWS = 6;
-const PRESSURE = ["#10b981", "#34d399", "#f59e0b", "#dc2626"] as const;
+/** Rose row colours mirror the seeded varieties (Red Naomi, Avalanche White,
+ *  Pink Floyd, Gold Strike, Orange Crush). */
+const ROSE_COLORS = ["#f87171", "#fecdd3", "#fb7185", "#fbbf24", "#fb923c"];
 
-/** Deterministic pseudo-random in [0,1) — stable across server & client. */
-function hash(n: number): number {
-  const x = Math.sin(n * 127.1) * 43758.5453;
-  return x - Math.floor(x);
-}
+/** Three rows of roses; nearer rows sit lower and render larger. */
+const ROSE_ROWS = [
+  { y: 224, r: 3.4, count: 11, startX: 32, gap: 34 },
+  { y: 243, r: 4, count: 10, startX: 16, gap: 41 },
+  { y: 263, r: 4.6, count: 9, startX: 34, gap: 45 },
+];
 
-const BEDS = Array.from({ length: COLS * ROWS }, (_, i) => {
-  const h = hash(i);
-  // Mostly healthy with a few hot spots — reads as a real farm, not noise.
-  const level = h > 0.93 ? 3 : h > 0.82 ? 2 : h > 0.5 ? 1 : 0;
-  return {
-    i,
-    color: PRESSURE[level],
-    delay: `${(hash(i + 99) * 5.5).toFixed(2)}s`,
-    base: level === 0 ? 0.16 : level === 1 ? 0.3 : 0.55,
-  };
-});
-
-const POLLEN = Array.from({ length: 12 }, (_, i) => ({
-  i,
-  left: `${(hash(i + 7) * 96).toFixed(1)}%`,
-  size: 2 + Math.round(hash(i + 23) * 4),
-  duration: `${(14 + hash(i + 41) * 12).toFixed(1)}s`,
-  delay: `${(hash(i + 61) * 14).toFixed(1)}s`,
-}));
-
-function LiveFarmCanvas() {
+/** Polytunnel greenhouse — an arch with ribs and a doorway. */
+function Tunnel({
+  x,
+  y,
+  w,
+  h,
+  delay,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  delay: string;
+}) {
+  const ribs = [0.28, 0.5, 0.72];
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute left-1/2 top-1/2 h-[360px] w-[360px] -translate-x-1/2 -translate-y-1/2">
-        <div
-          className="grid h-full w-full gap-[7px]"
-          style={{
-            gridTemplateColumns: `repeat(${COLS}, 1fr)`,
-            gridTemplateRows: `repeat(${ROWS}, 1fr)`,
-            transform: "rotateX(52deg) rotateZ(-42deg)",
-          }}
-        >
-          {BEDS.map((b) => (
-            <span
-              key={b.i}
-              className="bed-tile rounded-[3px]"
-              style={{
-                backgroundColor: b.color,
-                opacity: b.base,
-                animationDelay: b.delay,
-              }}
-            />
-          ))}
-        </div>
-
-        <svg
-          className="absolute left-1/2 top-1/2 h-[440px] w-[440px] -translate-x-1/2 -translate-y-1/2"
-          viewBox="0 0 200 200"
-          aria-hidden
-        >
-          {[92, 68, 44].map((r) => (
-            <circle
-              key={r}
-              cx="100"
-              cy="100"
-              r={r}
-              fill="none"
-              stroke="white"
-              strokeOpacity="0.12"
-              strokeWidth="0.7"
-              strokeDasharray="2.5 3.5"
-            />
-          ))}
-        </svg>
-        <div className="radar-sweep absolute left-1/2 top-1/2 h-[440px] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-full [background:conic-gradient(from_0deg,transparent_0deg,rgba(52,211,153,0.2)_18deg,transparent_46deg)]" />
-      </div>
-
-      {POLLEN.map((p) => (
-        <span
-          key={p.i}
-          className="pollen absolute bottom-0 rounded-full bg-brand-200"
-          style={{
-            left: p.left,
-            width: p.size,
-            height: p.size,
-            animationDuration: p.duration,
-            animationDelay: p.delay,
-          }}
-        />
-      ))}
-
-      {/* vignette so text always wins over the artwork */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,rgba(2,28,18,0.75)_100%)]" />
-    </div>
+    <g className="tunnel-in" style={{ animationDelay: delay }}>
+      {/* arch body */}
+      <path
+        d={`M${x} ${y} L${x} ${y - h * 0.45} Q${x} ${y - h} ${x + w / 2} ${y - h} Q${x + w} ${y - h} ${x + w} ${y - h * 0.45} L${x + w} ${y} Z`}
+        fill="white"
+        fillOpacity="0.16"
+        stroke="white"
+        strokeOpacity="0.55"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      {/* structural ribs */}
+      {ribs.map((t) => {
+        const rx = x + w * t;
+        const arch = Math.sin(Math.PI * t);
+        return (
+          <line
+            key={t}
+            x1={rx}
+            y1={y}
+            x2={rx}
+            y2={y - h * (0.45 + 0.55 * arch)}
+            stroke="white"
+            strokeOpacity="0.3"
+            strokeWidth="1.1"
+          />
+        );
+      })}
+      {/* doorway */}
+      <rect
+        x={x + w / 2 - w * 0.11}
+        y={y - h * 0.34}
+        width={w * 0.22}
+        height={h * 0.34}
+        rx="2"
+        fill="#04301f"
+        fillOpacity="0.5"
+      />
+    </g>
   );
 }
 
-function BrandPanel() {
+/** Flat-vector rose farm: hills, polytunnels, rose rows, drifting clouds. */
+function FarmScene() {
   return (
-    <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-800 via-brand-900 to-[#021c12] p-10 lg:flex lg:w-[52%]">
-      <LiveFarmCanvas />
+    <svg
+      viewBox="0 0 420 290"
+      className="mx-auto h-auto w-full max-w-md"
+      role="img"
+      aria-label="Illustration of polytunnel greenhouses on a rose farm"
+    >
+      {/* sun */}
+      <circle cx="348" cy="52" r="26" fill="#f0c060" fillOpacity="0.28" />
+      <circle cx="348" cy="52" r="16" fill="#f0c060" fillOpacity="0.85" />
 
-      <div className="petal-in relative">
-        <Logo tone="light" size={38} />
-      </div>
+      {/* drifting clouds — clipped to the frame so they wrap cleanly */}
+      <g clipPath="url(#scene-clip)">
+        <g className="cloud-drift" style={{ animationDuration: "44s" }}>
+          <g fill="white" fillOpacity="0.9">
+            <ellipse cx="40" cy="58" rx="20" ry="11" />
+            <ellipse cx="58" cy="54" rx="15" ry="14" />
+            <ellipse cx="74" cy="59" rx="16" ry="10" />
+          </g>
+        </g>
+        <g
+          className="cloud-drift"
+          style={{ animationDuration: "62s", animationDelay: "-28s" }}
+        >
+          <g fill="white" fillOpacity="0.55">
+            <ellipse cx="30" cy="96" rx="15" ry="8" />
+            <ellipse cx="44" cy="93" rx="12" ry="11" />
+            <ellipse cx="57" cy="97" rx="12" ry="7" />
+          </g>
+        </g>
+      </g>
 
-      <p className="relative max-w-sm text-[2rem] font-bold leading-[1.15] tracking-tight text-white">
-        Every bloom scouted.
-        <br />
-        <span className="text-brand-400">Every threat seen early.</span>
-      </p>
+      {/* rolling hills */}
+      <path
+        d="M0 178 Q90 146 190 172 Q290 198 420 162 L420 290 L0 290 Z"
+        fill="#0a4a30"
+      />
+      <path
+        d="M0 200 Q110 172 220 196 Q320 218 420 190 L420 290 L0 290 Z"
+        fill="#0d5c3c"
+      />
 
-      <p className="relative text-[11px] text-white/30">
-        Naivasha Rose Estate
-      </p>
-    </div>
+      {/* polytunnels standing on the mid hill */}
+      <Tunnel x={38} y={200} w={92} h={54} delay="120ms" />
+      <Tunnel x={148} y={206} w={104} h={62} delay="220ms" />
+      <Tunnel x={272} y={198} w={88} h={50} delay="320ms" />
+
+      {/* foreground field */}
+      <path
+        d="M0 214 Q120 196 240 214 Q340 229 420 208 L420 290 L0 290 Z"
+        fill="#10714a"
+      />
+
+      {/* rose rows — bushes with blooms */}
+      {ROSE_ROWS.map((row, ri) =>
+        Array.from({ length: row.count }, (_, i) => {
+          const cx = row.startX + i * row.gap;
+          const color = ROSE_COLORS[(i + ri) % ROSE_COLORS.length]!;
+          return (
+            <g key={`${ri}-${i}`}>
+              {/* bush */}
+              <ellipse
+                cx={cx}
+                cy={row.y + row.r * 1.1}
+                rx={row.r * 2.1}
+                ry={row.r * 1.25}
+                fill="#16855a"
+              />
+              {/* bloom */}
+              <circle
+                className="bloom-pop"
+                cx={cx}
+                cy={row.y}
+                r={row.r}
+                fill={color}
+                style={{ animationDelay: `${420 + ri * 130 + i * 45}ms` }}
+              />
+            </g>
+          );
+        }),
+      )}
+
+      <defs>
+        <clipPath id="scene-clip">
+          <rect x="0" y="0" width="420" height="180" />
+        </clipPath>
+      </defs>
+    </svg>
   );
 }
 
@@ -142,11 +185,12 @@ function LoginForm() {
 
   const [deviceId, setDeviceId] = useState("");
   const [pin, setPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Time-of-day greeting, set after mount so SSR and client markup agree.
-  const [greeting, setGreeting] = useState("Welcome back");
+  const [greeting, setGreeting] = useState("Welcome");
   useEffect(() => {
     const h = new Date().getHours();
     setGreeting(
@@ -177,92 +221,148 @@ function LoginForm() {
     }
   }
 
-  const field =
-    "peer w-full rounded-xl border border-line bg-surface px-4 pb-2.5 pt-6 text-sm font-medium text-ink outline-none transition-all placeholder:text-transparent focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100";
-  const label =
-    "pointer-events-none absolute left-4 top-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:normal-case peer-placeholder-shown:tracking-normal peer-focus:top-2 peer-focus:text-[11px] peer-focus:uppercase peer-focus:tracking-wide peer-focus:text-brand-700";
+  const inputCls =
+    "w-full rounded-xl border border-line bg-white px-4 py-3 text-sm text-ink outline-none transition-all placeholder:text-ink-faint/70 focus:border-brand-500 focus:ring-4 focus:ring-brand-100";
 
   return (
-    <div className="flex min-h-screen bg-white">
-      <BrandPanel />
+    <div className="relative min-h-screen overflow-hidden bg-brand-800">
+      {/* ── Organic background shapes ── */}
+      <div className="pointer-events-none absolute inset-0" aria-hidden>
+        <div className="absolute -left-32 -top-40 h-[26rem] w-[26rem] rounded-full bg-[#d8a657] opacity-90" />
+        <div className="absolute -bottom-48 -right-32 h-[34rem] w-[34rem] rounded-full bg-[#d8a657] opacity-90" />
+        <div className="absolute -bottom-24 left-1/4 h-[22rem] w-[30rem] rounded-full bg-brand-900/60" />
+      </div>
 
-      <div className="flex flex-1 items-center justify-center p-6 sm:p-10">
-        <div className="rise-in w-full max-w-sm">
-          <div className="mb-9 lg:hidden">
+      {/* ── Floating card ── */}
+      <div className="relative flex min-h-screen items-center justify-center p-4 sm:p-8">
+        <div className="rise-in grid w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl lg:grid-cols-2">
+          {/* Form side */}
+          <div className="flex flex-col justify-center px-8 py-12 sm:px-12">
             <Logo size={38} />
-          </div>
-          <div className="mb-9 hidden lg:block">
-            <LogoMark size={42} />
-          </div>
 
-          <h1 className="text-[1.875rem] font-bold leading-tight tracking-tight text-ink">
-            {greeting}
-          </h1>
-          <p className="mt-1.5 text-sm text-ink-faint">
-            Sign in to continue.
-          </p>
-
-          <form onSubmit={onSubmit} className="mt-8 space-y-3.5">
-            {error && <ErrorBox message={error} />}
-
-            <div className="relative">
-              <input
-                id="device"
-                value={deviceId}
-                onChange={(e) => setDeviceId(e.target.value)}
-                placeholder="device"
-                autoComplete="username"
-                required
-                className={field}
-              />
-              <label htmlFor="device" className={label}>
-                Device identifier
-              </label>
+            <div className="mt-10">
+              <p className="text-sm font-medium text-ink-faint">{greeting}</p>
+              <h1 className="mt-1 text-4xl font-bold tracking-tight text-ink">
+                Log In
+              </h1>
             </div>
 
-            <div className="relative">
-              <input
-                id="pin"
-                type="password"
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                placeholder="pin"
-                autoComplete="current-password"
-                inputMode="numeric"
-                required
-                className={field}
-              />
-              <label htmlFor="pin" className={label}>
-                PIN
-              </label>
-            </div>
+            <form onSubmit={onSubmit} className="mt-8 space-y-5">
+              {error && <ErrorBox message={error} />}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="group flex w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-3.5 text-sm font-bold text-white transition-colors hover:bg-brand-800 focus:outline-none focus:ring-4 focus:ring-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? (
-                <>
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                  Signing in…
-                </>
-              ) : (
-                <>
-                  Sign in
-                  <ArrowRight
-                    size={16}
-                    className="transition-transform group-hover:translate-x-0.5"
+              <div>
+                <label
+                  htmlFor="device"
+                  className="mb-1.5 block text-sm font-medium text-ink-soft"
+                >
+                  Device identifier
+                </label>
+                <input
+                  id="device"
+                  value={deviceId}
+                  onChange={(e) => setDeviceId(e.target.value)}
+                  placeholder="Your device ID"
+                  autoComplete="username"
+                  required
+                  className={inputCls}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="pin"
+                  className="mb-1.5 block text-sm font-medium text-ink-soft"
+                >
+                  PIN
+                </label>
+                <div className="relative">
+                  <input
+                    id="pin"
+                    type={showPin ? "text" : "password"}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value)}
+                    placeholder="Your PIN"
+                    autoComplete="current-password"
+                    inputMode="numeric"
+                    required
+                    className={`${inputCls} pr-11`}
                   />
-                </>
-              )}
-            </button>
-          </form>
+                  <button
+                    type="button"
+                    onClick={() => setShowPin((v) => !v)}
+                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint transition-colors hover:text-ink-soft"
+                  >
+                    {showPin ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+                <p className="mt-2 text-right text-sm text-ink-faint">
+                  Forgotten your PIN? Ask your administrator.
+                </p>
+              </div>
 
-          <p className="mt-8 text-xs text-ink-faint">
-            Scouts capture observations in the mobile app.
-          </p>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-3.5 text-sm font-bold text-white transition-colors hover:bg-brand-800 focus:outline-none focus:ring-4 focus:ring-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    Signing in…
+                  </>
+                ) : (
+                  "Log In"
+                )}
+              </button>
+            </form>
+
+            <p className="mt-8 text-center text-sm text-ink-faint">
+              Field scouts capture observations in the{" "}
+              <span className="font-semibold text-ink-soft">mobile app</span>.
+            </p>
+          </div>
+
+          {/* Brand side */}
+          <div className="relative hidden bg-brand-800 p-3 lg:block">
+            <div className="relative flex h-full flex-col justify-between overflow-hidden rounded-2xl border border-white/25 bg-gradient-to-br from-brand-800 via-brand-900 to-[#022c1c] px-9 py-10">
+              {/* soft blobs inside the panel */}
+              <div className="pointer-events-none absolute inset-0" aria-hidden>
+                <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-white/[0.04]" />
+                <div className="absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-white/[0.04]" />
+              </div>
+
+              <div className="relative flex justify-end">
+                <div className="text-right">
+                  <p className="text-xl font-bold leading-tight text-white">
+                    Flori<span className="text-brand-400">Synergy</span>
+                  </p>
+                  <p className="text-xs font-medium text-white/50">( Scouting )</p>
+                </div>
+              </div>
+
+              <div className="relative">
+                <FarmScene />
+              </div>
+
+              <div className="relative text-center">
+                <h2 className="text-3xl font-bold leading-tight text-white">
+                  Every bloom scouted
+                </h2>
+                <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-white/55">
+                  Geofenced field scouting and threshold-driven action — from the
+                  greenhouse bed to your dashboard, in{" "}
+                  <span className="font-semibold text-brand-400">real time</span>.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
+
+      {/* Mobile-only mark so the brand still reads on small screens */}
+      <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 lg:hidden">
+        <LogoMark size={26} />
       </div>
     </div>
   );
