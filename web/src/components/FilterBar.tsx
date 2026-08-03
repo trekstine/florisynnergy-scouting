@@ -4,10 +4,16 @@ import { Filter, X } from "lucide-react";
 
 import { Select } from "@/components/ui";
 import { SCOUTING_LABEL } from "@/lib/format";
-import { useDiseases, useGreenhouses, usePests, useVarieties } from "@/lib/hooks";
+import {
+  useDiseases,
+  useEmployees,
+  useGreenhouses,
+  usePests,
+  useVarieties,
+} from "@/lib/hooks";
 import type { Filters, ScoutingFor } from "@/lib/types";
 
-const RANGES: { label: string; days: number }[] = [
+const DEFAULT_RANGES: { label: string; days: number }[] = [
   { label: "7d", days: 7 },
   { label: "30d", days: 30 },
   { label: "90d", days: 90 },
@@ -30,7 +36,9 @@ export function FilterBar({
   showPest = true,
   showDisease = true,
   showVariety = true,
+  showScout = false,
   showType = true,
+  ranges = DEFAULT_RANGES,
 }: {
   value: Filters;
   onChange: (f: Filters) => void;
@@ -38,21 +46,29 @@ export function FilterBar({
   showPest?: boolean;
   showDisease?: boolean;
   showVariety?: boolean;
+  /** Off by default — only record-level views filter by who captured. */
+  showScout?: boolean;
   showType?: boolean;
+  /** Override the date presets, e.g. to offer "Today" on the records list. */
+  ranges?: { label: string; days: number }[];
 }) {
   const greenhouses = useGreenhouses();
   const pests = usePests();
   const diseases = useDiseases();
   const varieties = useVarieties();
+  const employees = useEmployees();
+
+  const scouts = (employees.data ?? []).filter((e) => e.role === "scout");
 
   const activeDays =
-    RANGES.find((r) => value.start === isoDaysAgo(r.days))?.days ?? 30;
+    ranges.find((r) => value.start === isoDaysAgo(r.days))?.days ?? -1;
 
   const hasActive =
     value.greenhouse_id != null ||
     value.pest_id != null ||
     value.disease_id != null ||
     value.variety_code != null ||
+    value.scout_id != null ||
     !!value.scouting_for;
 
   const sel = "!w-auto !py-1.5 text-xs";
@@ -64,7 +80,7 @@ export function FilterBar({
       </span>
 
       <div className="flex overflow-hidden rounded-lg border border-line">
-        {RANGES.map((r) => (
+        {ranges.map((r) => (
           <button
             key={r.days}
             onClick={() =>
@@ -164,6 +180,27 @@ export function FilterBar({
           {(varieties.data ?? []).map((v) => (
             <option key={v.id} value={v.code}>
               {v.name}
+            </option>
+          ))}
+        </Select>
+      )}
+
+      {showScout && (
+        <Select
+          className={sel}
+          title="Scout"
+          value={value.scout_id ?? ""}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              scout_id: e.target.value ? Number(e.target.value) : undefined,
+            })
+          }
+        >
+          <option value="">All scouts</option>
+          {scouts.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
             </option>
           ))}
         </Select>

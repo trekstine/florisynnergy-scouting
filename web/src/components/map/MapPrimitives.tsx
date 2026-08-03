@@ -118,24 +118,38 @@ export function PressureMap({
   data,
   selectedId,
   onSelect,
+  onHover,
   showLabels = true,
   heatPoints,
   showHeat = false,
   showChoropleth = true,
+  scrollWheelZoom = true,
 }: {
   data: GreenhousePressure[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  /** Fires with the block under the cursor, or null on leave — lets callers
+   *  show details without the user having to click through. */
+  onHover?: (gh: GreenhousePressure | null) => void;
   showLabels?: boolean;
   heatPoints?: [number, number, number][];
   showHeat?: boolean;
   showChoropleth?: boolean;
+  /** Off for maps embedded in a scrolling page — otherwise the wheel zooms
+   *  the map instead of scrolling the page. Use the +/− buttons instead. */
+  scrollWheelZoom?: boolean;
 }) {
   const polygons = data.map((g) => toLatLng(g.boundary));
   const signature = data.map((g) => g.greenhouse_id).join(",");
 
   return (
-    <MapContainer center={FARM_CENTER} zoom={DEFAULT_ZOOM} className="h-full w-full" zoomControl>
+    <MapContainer
+      center={FARM_CENTER}
+      zoom={DEFAULT_ZOOM}
+      className="h-full w-full"
+      zoomControl
+      scrollWheelZoom={scrollWheelZoom}
+    >
       <BaseMaps />
       <ScaleControl position="bottomleft" />
       <FitBounds polygons={polygons} signature={signature} />
@@ -157,8 +171,14 @@ export function PressureMap({
             }}
             eventHandlers={{
               click: () => onSelect(g.greenhouse_id),
-              mouseover: (e) => e.target.setStyle({ weight: 3, fillOpacity: 0.88 }),
-              mouseout: (e) => e.target.setStyle({ weight: baseWeight, fillOpacity: baseOpacity }),
+              mouseover: (e) => {
+                e.target.setStyle({ weight: 3, fillOpacity: 0.88 });
+                onHover?.(g);
+              },
+              mouseout: (e) => {
+                e.target.setStyle({ weight: baseWeight, fillOpacity: baseOpacity });
+                onHover?.(null);
+              },
             }}
           >
             {showLabels && (

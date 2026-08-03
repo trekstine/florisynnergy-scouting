@@ -38,6 +38,7 @@ export function filterQS(f: Filters = {}): string {
   if (f.pest_id) qs.set("pest_id", String(f.pest_id));
   if (f.disease_id) qs.set("disease_id", String(f.disease_id));
   if (f.variety_code) qs.set("variety_code", f.variety_code);
+  if (f.scout_id) qs.set("scout_id", String(f.scout_id));
   if (f.scouting_for) qs.set("scouting_for", f.scouting_for);
   const s = qs.toString();
   return s ? `?${s}` : "";
@@ -51,6 +52,7 @@ const fkey = (f: Filters = {}) =>
     f.pest_id,
     f.disease_id,
     f.variety_code,
+    f.scout_id,
     f.scouting_for,
   ].join("|");
 
@@ -183,6 +185,9 @@ export const useScouting = (params?: {
   greenhouse_id?: number;
   scouting_for?: string;
   scout_id?: number;
+  pest_id?: number;
+  disease_id?: number;
+  variety_code?: string;
   start?: string;
   end?: string;
   limit?: number;
@@ -191,6 +196,9 @@ export const useScouting = (params?: {
   if (params?.greenhouse_id) qs.set("greenhouse_id", String(params.greenhouse_id));
   if (params?.scouting_for) qs.set("scouting_for", params.scouting_for);
   if (params?.scout_id) qs.set("scout_id", String(params.scout_id));
+  if (params?.pest_id) qs.set("pest_id", String(params.pest_id));
+  if (params?.disease_id) qs.set("disease_id", String(params.disease_id));
+  if (params?.variety_code) qs.set("variety_code", params.variety_code);
   if (params?.start) qs.set("start", params.start);
   if (params?.end) qs.set("end", params.end);
   if (params?.limit) qs.set("limit", String(params.limit));

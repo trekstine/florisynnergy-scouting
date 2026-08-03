@@ -15,12 +15,17 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import {
+  FilterBar,
+  defaultFilters,
+  isoDaysAgo,
+} from "@/components/FilterBar";
+import { PaginationBar, usePagination } from "@/components/Pagination";
+import {
   Badge,
   Button,
   Card,
   EmptyState,
   PageHeader,
-  Select,
   Spinner,
 } from "@/components/ui";
 import {
@@ -44,21 +49,22 @@ import {
   useScoutSummary,
   useVarieties,
 } from "@/lib/hooks";
-import type { Recommendation, ScoutingFor, ScoutingRecord } from "@/lib/types";
+import type { Filters, Recommendation, ScoutingRecord } from "@/lib/types";
 
+/** Records list gets a "Today" preset the analytics ranges don't offer. */
 const RANGES = [
-  { days: 1, label: "Today", noun: "today" },
-  { days: 7, label: "7d", noun: "in the last 7 days" },
-  { days: 30, label: "30d", noun: "in the last 30 days" },
+  { days: 1, label: "Today" },
+  { days: 7, label: "7d" },
+  { days: 30, label: "30d" },
+  { days: 90, label: "90d" },
 ];
 
-function rangeDates(days: number): { start: string; end: string } {
-  const end = new Date();
-  const start = new Date();
-  start.setUTCDate(end.getUTCDate() - (days - 1));
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  return { start: iso(start), end: iso(end) };
-}
+const RANGE_NOUN: Record<number, string> = {
+  1: "today",
+  7: "in the last 7 days",
+  30: "in the last 30 days",
+  90: "in the last 90 days",
+};
 
 /** A scouting record joined with resolved names, flags, and its recommendation. */
 interface Row {
@@ -77,15 +83,15 @@ interface Row {
 }
 
 export default function ScoutingPage() {
-  const [rangeDays, setRangeDays] = useState(7);
-  const [gh, setGh] = useState("");
-  const [kind, setKind] = useState("");
-  const [scoutId, setScoutId] = useState("");
+  const [filters, setFilters] = useState<Filters>(defaultFilters(7));
   const [sort, setSort] = useState<"pressure" | "recent">("pressure");
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  const { start, end } = useMemo(() => rangeDates(rangeDays), [rangeDays]);
-  const rangeNoun = RANGES.find((r) => r.days === rangeDays)?.noun ?? "";
+  const start = filters.start ?? "";
+  const end = filters.end ?? "";
+  const activeDays =
+    RANGES.find((r) => filters.start === isoDaysAgo(r.days))?.days ?? 0;
+  const rangeNoun = RANGE_NOUN[activeDays] ?? "in range";
 
   const greenhouses = useGreenhouses();
   const pests = usePests();
@@ -95,14 +101,13 @@ export default function ScoutingPage() {
   const recs = useRecommendations();
   const createRec = useCreateRecommendation();
 
-  const filters = useMemo(
-    () => ({ start, end, greenhouse_id: gh ? Number(gh) : undefined }),
-    [start, end, gh],
-  );
   const scouting = useScouting({
-    greenhouse_id: gh ? Number(gh) : undefined,
-    scouting_for: kind || undefined,
-    scout_id: scoutId ? Number(scoutId) : undefined,
+    greenhouse_id: filters.greenhouse_id,
+    scouting_for: filters.scouting_for || undefined,
+    scout_id: filters.scout_id,
+    pest_id: filters.pest_id,
+    disease_id: filters.disease_id,
+    variety_code: filters.variety_code,
     start,
     end,
     limit: 1000,
@@ -135,11 +140,6 @@ export default function ScoutingPage() {
     for (const e of employees.data ?? []) m.set(e.id, e.name);
     return m;
   }, [employees.data]);
-  const scouts = useMemo(
-    () => (employees.data ?? []).filter((e) => e.role === "scout"),
-    [employees.data],
-  );
-
   // Recommendation index: greenhouse + agent → rec (open/planned preferred).
   const { openRecByKey, anyRecByKey } = useMemo(() => {
     const open = new Map<string, Recommendation>();
@@ -260,6 +260,10 @@ export default function ScoutingPage() {
     [sorted, selectedId],
   );
 
+  // Reset to page 1 whenever the result set changes underneath — otherwise a
+  // narrowing filter can leave you stranded on an empty page.
+  const paged = usePagination(sorted, 25, `${JSON.stringify(filters)}|${sort}`);
+
   function exportCsv() {
     const head = [
       "recorded_at",
@@ -321,62 +325,15 @@ export default function ScoutingPage() {
         }
       />
 
-      {/* Filters */}
+      {/* Filters — the same shared bar the rest of the portal uses, plus a
+          scout selector and a "Today" preset that only make sense here. */}
       <div className="flex flex-wrap items-center gap-2 px-6">
-        <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
-          {RANGES.map((rg) => (
-            <button
-              key={rg.days}
-              onClick={() => setRangeDays(rg.days)}
-              className={
-                "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors " +
-                (rangeDays === rg.days
-                  ? "bg-brand-600 text-white"
-                  : "text-ink-soft hover:bg-surface")
-              }
-            >
-              {rg.label}
-            </button>
-          ))}
-        </div>
-        <Select
-          value={gh}
-          onChange={(e) => setGh(e.target.value)}
-          className="max-w-[190px]"
-        >
-          <option value="">All greenhouses</option>
-          {(greenhouses.data ?? []).map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-        </Select>
-        <Select
-          value={kind}
-          onChange={(e) => setKind(e.target.value)}
-          className="max-w-[160px]"
-        >
-          <option value="">All types</option>
-          {(["disease", "pest", "lure", "sticky_trap"] as ScoutingFor[]).map(
-            (k) => (
-              <option key={k} value={k}>
-                {SCOUTING_LABEL[k]}
-              </option>
-            ),
-          )}
-        </Select>
-        <Select
-          value={scoutId}
-          onChange={(e) => setScoutId(e.target.value)}
-          className="max-w-[160px]"
-        >
-          <option value="">All scouts</option>
-          {scouts.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </Select>
+        <FilterBar
+          value={filters}
+          onChange={setFilters}
+          showScout
+          ranges={RANGES}
+        />
         {scouting.isFetching && <Spinner label="" />}
       </div>
 
@@ -489,7 +446,7 @@ export default function ScoutingPage() {
             </div>
           ) : (
             <ul className="divide-y divide-line">
-              {sorted.map((x) => (
+              {paged.paged.map((x) => (
                 <li key={x.r.id}>
                   <button
                     onClick={() => setSelectedId(x.r.id)}
@@ -530,6 +487,17 @@ export default function ScoutingPage() {
                 </li>
               ))}
             </ul>
+          )}
+
+          {!loading && sorted.length > 0 && (
+            <PaginationBar
+              page={paged.page}
+              totalPages={paged.totalPages}
+              pageSize={paged.pageSize}
+              total={paged.total}
+              onPage={paged.setPage}
+              onPageSize={paged.setPageSize}
+            />
           )}
         </Card>
       </div>

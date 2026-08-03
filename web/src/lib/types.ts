@@ -230,6 +230,7 @@ export interface Filters {
   pest_id?: number;
   disease_id?: number;
   variety_code?: string;
+  scout_id?: number;
   scouting_for?: ScoutingFor | "";
 }
 

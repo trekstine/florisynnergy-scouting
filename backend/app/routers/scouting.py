@@ -32,6 +32,9 @@ async def list_scouting(
     greenhouse_id: int | None = Query(default=None),
     scouting_for: str | None = Query(default=None),
     scout_id: int | None = Query(default=None),
+    pest_id: int | None = Query(default=None),
+    disease_id: int | None = Query(default=None),
+    variety_code: str | None = Query(default=None),
     start: date | None = Query(default=None),
     end: date | None = Query(default=None),
     limit: int = Query(default=200, le=1000),
@@ -46,6 +49,12 @@ async def list_scouting(
         q = q.where(ScoutingRecord.greenhouse_id == greenhouse_id)
     if scouting_for is not None:
         q = q.where(ScoutingRecord.scouting_for == scouting_for)
+    if pest_id is not None:
+        q = q.where(ScoutingRecord.pest_id == pest_id)
+    if disease_id is not None:
+        q = q.where(ScoutingRecord.disease_id == disease_id)
+    if variety_code is not None:
+        q = q.where(ScoutingRecord.variety_code == variety_code)
     if start is not None:
         q = q.where(
             ScoutingRecord.recorded_at

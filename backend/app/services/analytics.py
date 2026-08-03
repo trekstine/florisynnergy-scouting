@@ -46,6 +46,7 @@ class Filters:
     pest_id: int | None = None
     disease_id: int | None = None
     variety_code: str | None = None
+    scout_id: int | None = None
     scouting_for: str | None = None
 
     def _dt_bounds(self) -> tuple[datetime | None, datetime | None]:
@@ -75,6 +76,8 @@ class Filters:
             q = q.where(ScoutingRecord.disease_id == self.disease_id)
         if self.variety_code is not None:
             q = q.where(ScoutingRecord.variety_code == self.variety_code)
+        if self.scout_id is not None:
+            q = q.where(ScoutingRecord.scout_id == self.scout_id)
         if self.scouting_for is not None:
             q = q.where(ScoutingRecord.scouting_for == self.scouting_for)
         return q

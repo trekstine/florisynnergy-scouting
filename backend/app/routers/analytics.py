@@ -35,6 +35,7 @@ def _filters(
     pest_id: int | None = Query(default=None),
     disease_id: int | None = Query(default=None),
     variety_code: str | None = Query(default=None),
+    scout_id: int | None = Query(default=None),
     scouting_for: str | None = Query(default=None),
 ) -> Filters:
     # Keyword args — Filters gained fields in the middle, so positional
@@ -46,6 +47,7 @@ def _filters(
         pest_id=pest_id,
         disease_id=disease_id,
         variety_code=variety_code,
+        scout_id=scout_id,
         scouting_for=scouting_for,
     )
 

@@ -171,6 +171,9 @@ export default function AnalyticsPage() {
     end: filters.end,
     greenhouse_id: filters.greenhouse_id,
     scouting_for: filters.scouting_for,
+    pest_id: filters.pest_id,
+    disease_id: filters.disease_id,
+    variety_code: filters.variety_code,
     limit: 1000,
   });
   const spray = useSpray();
@@ -233,13 +236,7 @@ export default function AnalyticsPage() {
    * only accepts greenhouse/type/scout/date.
    */
   const detailRows: ScoutingDetailRow[] = useMemo(() => {
-    return (scouting.data ?? [])
-      .filter((r) => (filters.pest_id ? r.pest_id === filters.pest_id : true))
-      .filter((r) => (filters.disease_id ? r.disease_id === filters.disease_id : true))
-      .filter((r) =>
-        filters.variety_code ? r.variety_code === filters.variety_code : true,
-      )
-      .map((r) => {
+    return (scouting.data ?? []).map((r) => {
         const isDisease = r.disease_id != null;
         return {
           r,
@@ -260,17 +257,7 @@ export default function AnalyticsPage() {
             r.fcm_count + r.sticky_trap_bug_count + r.lure_bug_count,
         };
       });
-  }, [
-    scouting.data,
-    filters.pest_id,
-    filters.disease_id,
-    filters.variety_code,
-    ghName,
-    pestName,
-    diseaseName,
-    varietyName,
-    scoutName,
-  ]);
+  }, [scouting.data, ghName, pestName, diseaseName, varietyName, scoutName]);
 
   const filteredScoutingRecords = useMemo(() => {
     const q = recordSearch.trim().toLowerCase();

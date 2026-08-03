@@ -350,7 +350,7 @@ function LoginForm() {
                   Every bloom scouted
                 </h2>
                 <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-white/55">
-                  Geofenced field scouting and threshold-driven action — from the
+                  Geofenced field scouting and threshold-driven action from the
                   greenhouse bed to your dashboard, in{" "}
                   <span className="font-semibold text-brand-400">real time</span>.
                 </p>

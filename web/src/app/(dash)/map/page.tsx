@@ -7,7 +7,8 @@ import {
   MousePointerClick,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { HBarChart, TrendChart } from "@/components/charts";
 import { FilterBar, defaultFilters } from "@/components/FilterBar";
@@ -36,11 +37,25 @@ import type { Filters, GreenhousePressure } from "@/lib/types";
 type View = "choropleth" | "heat" | "both";
 
 export default function MapPage() {
+  // useSearchParams needs a Suspense boundary in the app router.
+  return (
+    <Suspense fallback={null}>
+      <MapView />
+    </Suspense>
+  );
+}
+
+function MapView() {
+  const searchParams = useSearchParams();
   const [filters, setFilters] = useState<Filters>(defaultFilters(30));
   const [view, setView] = useState<View>("choropleth");
   const pressure = usePressure(filters);
   const points = usePoints(filters);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  // Deep link: /map?greenhouse=3 opens straight into that block's panel,
+  // so clicking a block on the dashboard map lands somewhere useful.
+  const initialId = Number(searchParams.get("greenhouse")) || null;
+  const [selectedId, setSelectedId] = useState<number | null>(initialId);
 
   const heatPoints = useMemo<[number, number, number][]>(
     () => (points.data ?? []).map((p) => [p.lat, p.lng, Math.max(0.15, p.severity / 5)]),
