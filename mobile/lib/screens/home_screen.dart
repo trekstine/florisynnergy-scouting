@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../api_service.dart';
 import '../auth_store.dart';
 import '../models.dart';
 import '../reference_cache.dart';
 import '../scouting_store.dart';
-import '../widgets/severity_slider.dart';
+import '../theme.dart';
+import '../widgets/form_widgets.dart';
 import 'greenhouse_picker_screen.dart';
 import 'login_screen.dart';
 
+/// Main shell, ported from Bloom's MainScreen: purple app bar with the
+/// current tab's title and an account button, an IndexedStack of tabs, a
+/// flat bottom nav with an animated top indicator line, and a "New Report"
+/// FAB on the Scouting tab.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -18,10 +25,25 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
+
   AuthSession? _session;
   List<QueuedScoutingEntry> _queue = [];
   List<ScoutingRecordSummary> _recent = [];
   bool _loading = true;
+
+  static const _tabLabels = ['Home', 'Scouting', 'Spray', 'Reports'];
+  static const _tabIcons = [
+    Icons.home_outlined,
+    Icons.biotech_outlined,
+    Icons.science_outlined,
+    Icons.analytics_outlined,
+  ];
+  static const _tabIconsActive = [
+    Icons.home_rounded,
+    Icons.biotech,
+    Icons.science,
+    Icons.analytics,
+  ];
 
   @override
   void initState() {
@@ -51,15 +73,14 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await ReferenceCache.instance.ensureLoaded(api, session.token);
     } catch (_) {
-      // Home still renders with whatever's cached; the picker screen
-      // surfaces a clearer error if there's truly nothing to work with.
+      // Render with whatever's cached; picker surfaces a clearer error.
     }
     final queue = await ScoutingQueueStore().all();
     List<ScoutingRecordSummary> recent = [];
     try {
-      recent = await api.fetchRecentScouting(session.token, limit: 20);
+      recent = await api.fetchRecentScouting(session.token, limit: 30);
     } catch (_) {
-      // Offline — recent activity just stays empty, not fatal.
+      // Offline — recent stays empty, not fatal.
     }
     if (!mounted) return;
     setState(() {
@@ -70,75 +91,198 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _startSession() async {
-    await Navigator.of(context).push(
+    await Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(builder: (_) => const GreenhousePickerScreen()),
     );
     await _refresh();
   }
 
-  Future<void> _signOut() async {
-    await AuthSessionStore().clearSession();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const ScoutLoginScreen()),
-      (route) => false,
+  void _showAccountSheet() {
+    final session = _session;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => Container(
+        decoration: const BoxDecoration(
+          color: kBackground,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: EdgeInsets.fromLTRB(
+          20, 16, 20, MediaQuery.of(sheetCtx).padding.bottom + 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: kBorder,
+                  borderRadius: BorderRadius.circular(100),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: kPrimary.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.person_outline_rounded,
+                      color: kPrimary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(session?.name ?? 'Scout', style: kSubheading()),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${session?.role ?? ''} · ${session?.deviceId ?? ''}',
+                        style: kCaption(),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.pop(sheetCtx);
+                await AuthSessionStore().clearSession();
+                if (!mounted) return;
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const ScoutLoginScreen()),
+                  (route) => false,
+                );
+              },
+              icon: const Icon(Icons.logout, size: 18, color: kError),
+              label: Text('Sign out', style: kLabel(color: kError)),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: kError.withOpacity(0.4)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final greenhouseCount = ReferenceCache.instance.greenhouses.length;
-
-    final screens = [
-      _HomeOverviewScreen(
+    final pages = [
+      _HomeTab(
         session: _session,
         loading: _loading,
-        greenhouseCount: greenhouseCount,
+        greenhouseCount: ReferenceCache.instance.greenhouses.length,
         pendingCount: _queue.length,
-        recent: _recent.take(5).toList(),
-        onStartSession: _startSession,
-        onSignOut: _signOut,
-      ),
-      _ScoutingOverviewScreen(
-        loading: _loading,
-        queue: _queue,
-        recent: _recent,
+        recent: _recent.take(4).toList(),
         onStartSession: _startSession,
         onRefresh: _refresh,
       ),
-      const _SprayScreen(),
-      _ReportsScreen(loading: _loading, recent: _recent, onRefresh: _refresh),
+      _ScoutingTab(
+        loading: _loading,
+        queue: _queue,
+        recent: _recent,
+        onRefresh: _refresh,
+      ),
+      const _SprayTab(),
+      _ReportsTab(loading: _loading, recent: _recent, onRefresh: _refresh),
     ];
 
     return Scaffold(
-      body: SafeArea(child: screens[_selectedIndex]),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: (index) => setState(() => _selectedIndex = index),
-        selectedItemColor: const Color(0xFF2E7D32),
-        unselectedItemColor: Colors.grey.shade600,
-        type: BottomNavigationBarType.fixed,
-        showUnselectedLabels: true,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.agriculture_outlined), label: 'Scouting'),
-          BottomNavigationBarItem(icon: Icon(Icons.water_drop_outlined), label: 'Spray'),
-          BottomNavigationBarItem(icon: Icon(Icons.bar_chart_outlined), label: 'Reports'),
+      backgroundColor: kBackground,
+      appBar: AppBar(
+        backgroundColor: kPrimary,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        automaticallyImplyLeading: false,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.local_florist_outlined,
+                  size: 20, color: Colors.white),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              _tabLabels[_selectedIndex],
+              style: kHeading(color: Colors.white),
+            ),
+          ],
+        ),
+        actions: [
+          GestureDetector(
+            onTap: _showAccountSheet,
+            child: Container(
+              margin: const EdgeInsets.only(right: 16),
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Center(
+                child: Icon(Icons.person_outline_rounded,
+                    size: 20, color: Colors.white),
+              ),
+            ),
+          ),
         ],
+      ),
+      body: IndexedStack(index: _selectedIndex, children: pages),
+      floatingActionButton: _selectedIndex == 1
+          ? FloatingActionButton.extended(
+              onPressed: _startSession,
+              backgroundColor: kPrimary,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: Text('New Report', style: kLabel(color: Colors.white)),
+            )
+          : null,
+      bottomNavigationBar: _BottomNav(
+        selectedIndex: _selectedIndex,
+        labels: _tabLabels,
+        icons: _tabIcons,
+        activeIcons: _tabIconsActive,
+        onTap: (i) {
+          if (_selectedIndex != i) setState(() => _selectedIndex = i);
+        },
       ),
     );
   }
 }
 
-class _HomeOverviewScreen extends StatelessWidget {
-  const _HomeOverviewScreen({
+// ─── Home tab ─────────────────────────────────────────────────────────────────
+
+class _HomeTab extends StatelessWidget {
+  const _HomeTab({
     required this.session,
     required this.loading,
     required this.greenhouseCount,
     required this.pendingCount,
     required this.recent,
     required this.onStartSession,
-    required this.onSignOut,
+    required this.onRefresh,
   });
 
   final AuthSession? session;
@@ -147,167 +291,216 @@ class _HomeOverviewScreen extends StatelessWidget {
   final int pendingCount;
   final List<ScoutingRecordSummary> recent;
   final VoidCallback onStartSession;
-  final VoidCallback onSignOut;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return RefreshIndicator(
+      color: kPrimary,
+      strokeWidth: 1.5,
+      onRefresh: onRefresh,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
         children: [
+          Text(
+            session != null
+                ? 'Welcome back, ${session!.name.split(' ').first}'
+                : 'Welcome back',
+            style: kDisplay(),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Capture field observations and keep the portal in sync.',
+            style: kBody(color: kTextSecondary),
+          ),
+          const SizedBox(height: 20),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session != null ? 'Hi, ${session!.name.split(' ').first}' : 'FloriSynergy Scouting',
-                      style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'A single place to capture field observations and keep the portal in sync.',
-                      style: TextStyle(fontSize: 15, color: Color(0xFF5A6A58)),
-                    ),
-                  ],
+                child: _StatCard(
+                  value: loading ? '—' : '$greenhouseCount',
+                  label: 'Greenhouses',
+                  icon: Icons.house_outlined,
+                  color: kPrimary,
                 ),
               ),
-              IconButton(
-                onPressed: onSignOut,
-                icon: const Icon(Icons.logout, color: Color(0xFF6D7D6E)),
-                tooltip: 'Sign out',
+              const SizedBox(width: 10),
+              Expanded(
+                child: _StatCard(
+                  value: loading ? '—' : '$pendingCount',
+                  label: 'Pending sync',
+                  icon: Icons.pending_actions_outlined,
+                  color: pendingCount > 0 ? kWarning : kSuccess,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 22),
-          Row(
-            children: [
-              _MetricCard(value: loading ? '—' : '$greenhouseCount', label: 'Greenhouses'),
-              const SizedBox(width: 12),
-              _MetricCard(
-                value: loading ? '—' : '$pendingCount',
-                label: 'Pending sync',
-                accent: pendingCount > 0,
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          _ActionCard(
-            title: 'Start a new scouting session',
-            subtitle: 'Pick a greenhouse, log disease, pest, lure, or sticky-trap observations.',
-            icon: Icons.add_circle_outline,
+          const SizedBox(height: 16),
+          // Primary action card
+          GestureDetector(
             onTap: onStartSession,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: kPrimary,
+                borderRadius: BorderRadius.circular(kRadiusLg),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(kRadiusMd),
+                    ),
+                    child: const Icon(Icons.add_circle_outline,
+                        color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('New scouting session',
+                            style: kSubheading(color: Colors.white)),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Select a greenhouse to start recording',
+                          style: kCaption(
+                              color: Colors.white.withOpacity(0.75)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded,
+                      color: Colors.white),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 22),
-          const Text('Recent activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
+          const SectionHeader(
+              icon: Icons.history_outlined, label: 'Recent activity'),
+          const SizedBox(height: 10),
           if (loading)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: CircularProgressIndicator()),
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: CircularProgressIndicator(
+                    color: kPrimary, strokeWidth: 1.5),
+              ),
             )
           else if (recent.isEmpty)
-            const _InfoCard(
-              title: 'Nothing synced yet',
-              message: 'Once you submit a scouting session it will show up here — and instantly in the web portal.',
+            const _EmptyState(
+              icon: Icons.document_scanner_outlined,
+              title: 'No scouting reports yet',
+              subtitle: 'Tap "New scouting session" to log your first entry',
             )
           else
             ...recent.map(
               (r) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _ActivityTile(record: r),
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _RecordCard(record: r),
               ),
             ),
-          const SizedBox(height: 6),
-          const _InfoCard(
-            title: 'Tip',
-            message: 'Entries queue on your device until you tap "Submit all" — capture as many as you like offline.',
-          ),
         ],
       ),
     );
   }
 }
 
-class _ScoutingOverviewScreen extends StatelessWidget {
-  const _ScoutingOverviewScreen({
+// ─── Scouting tab ─────────────────────────────────────────────────────────────
+
+class _ScoutingTab extends StatelessWidget {
+  const _ScoutingTab({
     required this.loading,
     required this.queue,
     required this.recent,
-    required this.onStartSession,
     required this.onRefresh,
   });
 
   final bool loading;
   final List<QueuedScoutingEntry> queue;
   final List<ScoutingRecordSummary> recent;
-  final VoidCallback onStartSession;
   final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    final byGreenhouse = <String, List<QueuedScoutingEntry>>{};
+    if (loading && recent.isEmpty && queue.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: kPrimary, strokeWidth: 1.5),
+      );
+    }
+
+    final byGreenhouse = <String, int>{};
     for (final entry in queue) {
-      byGreenhouse.putIfAbsent(entry.greenhouseLabel, () => []).add(entry);
+      byGreenhouse[entry.greenhouseLabel] =
+          (byGreenhouse[entry.greenhouseLabel] ?? 0) + 1;
+    }
+
+    if (recent.isEmpty && queue.isEmpty) {
+      return const _EmptyState(
+        icon: Icons.document_scanner_outlined,
+        title: 'No scouting reports yet',
+        subtitle: 'Tap "New Report" to log your first entry',
+      );
     }
 
     return RefreshIndicator(
+      color: kPrimary,
+      strokeWidth: 1.5,
       onRefresh: onRefresh,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Scouting', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-              FilledButton.icon(
-                onPressed: onStartSession,
-                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('New session'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
           if (byGreenhouse.isNotEmpty) ...[
-            const Text('Queued locally', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            const SectionHeader(
+              icon: Icons.pending_actions_outlined,
+              label: 'Queued on this device',
+              accentColor: kWarning,
+            ),
             const SizedBox(height: 10),
             ...byGreenhouse.entries.map(
               (e) => Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF3E0),
-                  borderRadius: BorderRadius.circular(16),
+                  color: kWarning.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(kRadiusMd),
+                  border: Border.all(color: kWarning.withOpacity(0.25)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.pending_actions, color: Color(0xFFEF6C00)),
-                    const SizedBox(width: 12),
+                    const Icon(Icons.layers_outlined,
+                        size: 18, color: kWarning),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Text('${e.key} · ${e.value.length} entr${e.value.length == 1 ? 'y' : 'ies'} not yet submitted'),
+                      child: Text('${e.key}', style: kLabel()),
                     ),
+                    MiniChip(
+                        label: '${e.value} pending', color: kWarning),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
           ],
-          const Text('Recently synced', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          const SectionHeader(
+              icon: Icons.cloud_done_outlined, label: 'Synced reports'),
           const SizedBox(height: 10),
-          if (loading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: CircularProgressIndicator()),
+          if (recent.isEmpty)
+            const _EmptyState(
+              icon: Icons.cloud_off,
+              title: 'Nothing synced yet',
+              subtitle: 'Submitted reports appear here and in the portal',
             )
-          else if (recent.isEmpty)
-            const _InfoCard(title: 'No records yet', message: 'Submitted observations will appear here.')
           else
             ...recent.map(
-              (r) => Padding(padding: const EdgeInsets.only(bottom: 10), child: _ActivityTile(record: r)),
+              (r) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _RecordCard(record: r),
+              ),
             ),
         ],
       ),
@@ -315,117 +508,171 @@ class _ScoutingOverviewScreen extends StatelessWidget {
   }
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.value, required this.label, this.accent = false});
+// ─── Spray tab (placeholder) ──────────────────────────────────────────────────
+
+class _SprayTab extends StatelessWidget {
+  const _SprayTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _EmptyState(
+      icon: Icons.science_outlined,
+      title: 'Spray records coming soon',
+      subtitle: 'Track applications and active spray tasks here',
+    );
+  }
+}
+
+// ─── Reports tab ──────────────────────────────────────────────────────────────
+
+class _ReportsTab extends StatelessWidget {
+  const _ReportsTab({
+    required this.loading,
+    required this.recent,
+    required this.onRefresh,
+  });
+
+  final bool loading;
+  final List<ScoutingRecordSummary> recent;
+  final Future<void> Function() onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading && recent.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: kPrimary, strokeWidth: 1.5),
+      );
+    }
+
+    // Simple by-type summary of what's synced.
+    final byType = <ScoutingType, int>{};
+    for (final r in recent) {
+      byType[r.scoutingFor] = (byType[r.scoutingFor] ?? 0) + 1;
+    }
+
+    return RefreshIndicator(
+      color: kPrimary,
+      strokeWidth: 1.5,
+      onRefresh: onRefresh,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          const SectionHeader(
+              icon: Icons.pie_chart_outline, label: 'Your recent breakdown'),
+          const SizedBox(height: 10),
+          Row(
+            children: ScoutingType.values.map((t) {
+              final count = byType[t] ?? 0;
+              return Expanded(
+                child: Container(
+                  margin: EdgeInsets.only(
+                      right: t == ScoutingType.values.last ? 0 : 8),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: t.color.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(kRadiusMd),
+                    border: Border.all(color: t.color.withOpacity(0.2)),
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(t.icon, size: 18, color: t.color),
+                      const SizedBox(height: 6),
+                      Text(
+                        '$count',
+                        style: GoogleFonts.nunito(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: t.color,
+                        ),
+                      ),
+                      Text(
+                        t.label,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.nunito(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          color: kTextSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 20),
+          const SectionHeader(
+              icon: Icons.analytics_outlined, label: 'All synced reports'),
+          const SizedBox(height: 10),
+          if (recent.isEmpty)
+            const _EmptyState(
+              icon: Icons.analytics_outlined,
+              title: 'No reports yet',
+              subtitle:
+                  'Full trends, heatmaps, and matrices live in the web portal',
+            )
+          else
+            ...recent.map(
+              (r) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _RecordCard(record: r),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Stat card ────────────────────────────────────────────────────────────────
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.value,
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
 
   final String value;
   final String label;
-  final bool accent;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = accent ? const Color(0xFFB25E00) : const Color(0xFF2E7D32);
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-        decoration: BoxDecoration(
-          color: accent ? const Color(0xFFFFF3E0) : const Color(0xFFE8F5E9),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(value, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: color)),
-            const SizedBox(height: 6),
-            Text(label, style: TextStyle(color: color.withOpacity(0.85))),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActionCard extends StatelessWidget {
-  const _ActionCard({required this.title, required this.subtitle, required this.icon, required this.onTap});
-
-  final String title;
-  final String subtitle;
   final IconData icon;
-  final VoidCallback onTap;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(24),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: const [BoxShadow(color: Color(0x12000000), blurRadius: 16, offset: Offset(0, 8))],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(16)),
-              child: Icon(icon, color: const Color(0xFF2E7D32), size: 26),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                  const SizedBox(height: 6),
-                  Text(subtitle, style: const TextStyle(color: Color(0xFF5A6A58))),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Color(0xFF9E9E9E)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActivityTile extends StatelessWidget {
-  const _ActivityTile({required this.record});
-
-  final ScoutingRecordSummary record;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = kSeverityScale[record.severity.clamp(0, 5).toInt()];
-    final subtitleParts = [
-      if (record.bedCode != null) 'Bed ${record.bedCode}',
-      '${record.severity}/5',
-    ];
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [BoxShadow(color: Color(0x0F000000), blurRadius: 12, offset: Offset(0, 6))],
+        color: kBackground,
+        borderRadius: BorderRadius.circular(kRadiusLg),
+        border: Border.all(color: kBorder),
       ),
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
-            child: Icon(record.scoutingFor.icon, color: const Color(0xFF2E4A2C)),
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(kRadiusMd),
+            ),
+            child: Icon(icon, size: 19, color: color),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(record.scoutingFor.label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                const SizedBox(height: 4),
-                Text(subtitleParts.join(' · '), style: const TextStyle(color: Color(0xFF6D6D6D))),
+                Text(
+                  value,
+                  style: GoogleFonts.nunito(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: kTextPrimary,
+                  ),
+                ),
+                Text(label, style: kCaption()),
               ],
             ),
           ),
@@ -435,80 +682,277 @@ class _ActivityTile extends StatelessWidget {
   }
 }
 
-class _InfoCard extends StatelessWidget {
-  const _InfoCard({required this.title, required this.message});
+// ─── Record card (Bloom's scouting list card) ─────────────────────────────────
 
-  final String title;
-  final String message;
+class _RecordCard extends StatelessWidget {
+  const _RecordCard({required this.record});
+
+  final ScoutingRecordSummary record;
+
+  String get _primaryLabel {
+    final cache = ReferenceCache.instance;
+    if (record.diseaseId != null) {
+      for (final d in cache.diseases) {
+        if (d.id == record.diseaseId) return d.name;
+      }
+    }
+    if (record.pestId != null) {
+      for (final p in cache.pests) {
+        if (p.id == record.pestId) return p.name;
+      }
+    }
+    return record.scoutingFor.label;
+  }
+
+  String get _greenhouseLabel {
+    if (record.greenhouseId == null) return '';
+    for (final g in ReferenceCache.instance.greenhouses) {
+      if (g.id == record.greenhouseId) return g.label;
+    }
+    return 'GH ${record.greenhouseId}';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final type = record.scoutingFor;
+    final sevColor = severityColor(record.severity);
+    final date = record.recordedAt.toLocal();
+    final dateStr =
+        '${_month(date.month)} ${date.day}';
+
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: const Color(0xFFF3F5EE), borderRadius: BorderRadius.circular(20)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-          const SizedBox(height: 8),
-          Text(message, style: const TextStyle(color: Color(0xFF5A6A58))),
-        ],
+      decoration: BoxDecoration(
+        color: kBackground,
+        borderRadius: BorderRadius.circular(kRadiusLg),
+        border: Border.all(color: kBorder),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: type.color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(kRadiusMd),
+              ),
+              child: Icon(type.icon, size: 20, color: type.color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _primaryLabel,
+                          style: kLabel(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(dateStr, style: kCaption()),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    [
+                      if (_greenhouseLabel.isNotEmpty) _greenhouseLabel,
+                      if (record.varietyCode != null) record.varietyCode!,
+                    ].join('  ·  '),
+                    style: kCaption(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      if (record.bedCode != null)
+                        MiniChip(
+                            label: 'Bed ${record.bedCode}',
+                            color: kTextSecondary),
+                      if (record.severity > 0)
+                        MiniChip(
+                          label: '$_primaryLabel ${record.severity}/5',
+                          color: sevColor,
+                        ),
+                      if (record.flagged)
+                        const MiniChip(label: 'Flagged', color: kError),
+                    ],
+                  ),
+                  if ((record.notes ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      record.notes!,
+                      style: kCaption(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 8, top: 2),
+              child: Column(
+                children: [
+                  if (record.severity > 0)
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: sevColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: kTextSecondary,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  static String _month(int m) => const [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ][m - 1];
 }
 
-class _SprayScreen extends StatelessWidget {
-  const _SprayScreen();
+// ─── Empty state ──────────────────────────────────────────────────────────────
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 24),
-        child: Text(
-          'Spray planning is coming soon. Use this tab to manage applications and track active spray tasks.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 17, color: Color(0xFF54675A)),
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: kSurface,
+                borderRadius: BorderRadius.circular(kRadiusLg),
+                border: Border.all(color: kBorder),
+              ),
+              child: Icon(icon, size: 28, color: kTextSecondary),
+            ),
+            const SizedBox(height: 16),
+            Text(title, style: kSubheading()),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: kBody(color: kTextSecondary),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _ReportsScreen extends StatelessWidget {
-  const _ReportsScreen({required this.loading, required this.recent, required this.onRefresh});
+// ─── Flat bottom nav (Bloom's, with the animated top indicator) ───────────────
 
-  final bool loading;
-  final List<ScoutingRecordSummary> recent;
-  final Future<void> Function() onRefresh;
+class _BottomNav extends StatelessWidget {
+  const _BottomNav({
+    required this.selectedIndex,
+    required this.labels,
+    required this.icons,
+    required this.activeIcons,
+    required this.onTap,
+  });
+
+  final int selectedIndex;
+  final List<String> labels;
+  final List<IconData> icons;
+  final List<IconData> activeIcons;
+  final ValueChanged<int> onTap;
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-        children: [
-          const Text('Reports', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 8),
-          const Text(
-            'Recent field observations. For trends, heatmaps, and pest matrices, open the web portal.',
-            style: TextStyle(color: Color(0xFF5A6A58)),
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: kBackground,
+        border: Border(top: BorderSide(color: kBorder, width: 1)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            children: List.generate(labels.length, (i) {
+              final active = i == selectedIndex;
+              return Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onTap(i),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.max,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        height: 4,
+                        width: active ? 48.0 : 0.0,
+                        decoration: const BoxDecoration(
+                          color: kPrimary,
+                          borderRadius: BorderRadius.vertical(
+                            bottom: Radius.circular(100),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(
+                        active ? activeIcons[i] : icons[i],
+                        size: 22,
+                        color: active ? kPrimary : kTextSecondary,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        labels[i],
+                        style: GoogleFonts.nunito(
+                          fontSize: 11,
+                          fontWeight:
+                              active ? FontWeight.w700 : FontWeight.w500,
+                          color: active ? kPrimary : kTextSecondary,
+                        ),
+                      ),
+                      const Spacer(),
+                    ],
+                  ),
+                ),
+              );
+            }),
           ),
-          const SizedBox(height: 18),
-          if (loading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (recent.isEmpty)
-            const _InfoCard(title: 'No records yet', message: 'Submit a scouting session to see it here.')
-          else
-            ...recent.map(
-              (r) => Padding(padding: const EdgeInsets.only(bottom: 10), child: _ActivityTile(record: r)),
-            ),
-        ],
+        ),
       ),
     );
   }

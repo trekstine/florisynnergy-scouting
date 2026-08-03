@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'theme.dart';
+
 /// The four capture modes the field flow supports. Each one drives a
 /// different subset of fields on the entry form (see
-/// `widgets/scouting_entry_form.dart`), mirroring how a scout actually works
+/// `screens/add_scouting_screen.dart`), mirroring how a scout actually works
 /// a greenhouse: disease/pest walks are variety-and-severity led, lure and
 /// sticky-trap checks are count led.
 enum ScoutingType { disease, pest, lure, stickyTrap }
@@ -48,6 +50,7 @@ extension ScoutingTypeX on ScoutingType {
     }
   }
 
+  /// Bloom's iconography, kept identical across both apps.
   IconData get icon {
     switch (this) {
       case ScoutingType.disease:
@@ -55,9 +58,25 @@ extension ScoutingTypeX on ScoutingType {
       case ScoutingType.pest:
         return Icons.bug_report_outlined;
       case ScoutingType.lure:
-        return Icons.local_fire_department_outlined;
+        return Icons.track_changes_outlined;
       case ScoutingType.stickyTrap:
-        return Icons.grid_on_outlined;
+        return Icons.sticky_note_2_outlined;
+    }
+  }
+
+  /// Bloom's per-type accent colors — they tint the details card, the type
+  /// selector pill, score chips, and queue rows so a scout can tell entry
+  /// types apart at a glance.
+  Color get color {
+    switch (this) {
+      case ScoutingType.disease:
+        return kError;
+      case ScoutingType.pest:
+        return kWarning;
+      case ScoutingType.lure:
+        return kLureBlue;
+      case ScoutingType.stickyTrap:
+        return kTrapViolet;
     }
   }
 
@@ -69,15 +88,11 @@ extension ScoutingTypeX on ScoutingType {
   }
 }
 
-/// Growth stage options for lure / sticky-trap catches. Kept as a plain list
-/// (rather than an enum) since supervisors may want to tweak the vocabulary
-/// from the portal without a mobile app release.
-const List<String> kLifecycleStages = [
-  'Egg',
-  'Larva',
-  'Pupa',
-  'Adult',
-];
+/// Growth-stage vocabulary — same options the Bloom app uses.
+const List<String> kStageOptions = ['Eggs', 'Larvae', 'Nymph', 'Adult'];
+
+/// Where-on-the-plant vocabulary — same options the Bloom app uses.
+const List<String> kPlantLocationOptions = ['Bud', 'Leaf', 'Middle', 'Bottom'];
 
 class Greenhouse {
   const Greenhouse({

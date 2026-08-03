@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../theme.dart';
 import '../view_models/login_view_model.dart';
+import '../widgets/form_widgets.dart';
 import 'home_screen.dart';
 
+/// Sign-in, in the Bloom visual language: white page, flat bordered card,
+/// labeled fields with surface-filled inputs, full-width primary button.
 class ScoutLoginScreen extends ConsumerWidget {
   const ScoutLoginScreen({super.key});
 
@@ -13,143 +17,137 @@ class ScoutLoginScreen extends ConsumerWidget {
     final viewModel = ref.read(loginViewModelProvider.notifier);
 
     return Scaffold(
+      backgroundColor: kSurface,
       body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 12),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: CircleAvatar(
-                    radius: 32,
-                    backgroundColor: Color(0xFFE7F5E9),
-                    child: Icon(
-                      Icons.agriculture,
-                      size: 32,
-                      color: Color(0xFF2E7D32),
+        child: Center(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: kPrimary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(kRadiusLg),
+                    ),
+                    child: const Icon(
+                      Icons.local_florist_outlined,
+                      size: 28,
+                      color: kPrimary,
                     ),
                   ),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Welcome back',
-                  style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF1A3A20),
+                  const SizedBox(height: 20),
+                  Text('Welcome back', style: kDisplay()),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Sign in with your device credentials to continue.',
+                    style: kBody(color: kTextSecondary),
                   ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Sign in to your account to continue.',
-                  style: TextStyle(fontSize: 16, color: Color(0xFF556756)),
-                ),
-                const SizedBox(height: 32),
-                _StyledCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextFormField(
-                        controller: state.baseUrlController,
-                        decoration: const InputDecoration(
-                          labelText: 'Backend URL',
-                          prefixIcon: Icon(Icons.language),
+                  const SizedBox(height: 24),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: kBackground,
+                      borderRadius: BorderRadius.circular(kRadiusLg),
+                      border: Border.all(color: kBorder),
+                    ),
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Backend URL',
+                            style: kLabel(color: kTextSecondary)),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: state.baseUrlController,
+                          style: kBody(),
+                          decoration: inputDeco(prefixIcon: Icons.language)
+                              .copyWith(hintText: 'https://…'),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: state.deviceIdController,
-                        decoration: const InputDecoration(
-                          labelText: 'Device ID',
-                          prefixIcon: Icon(Icons.device_hub),
+                        const SizedBox(height: 16),
+                        Text('Device ID',
+                            style: kLabel(color: kTextSecondary)),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: state.deviceIdController,
+                          style: kBody(),
+                          decoration: inputDeco(
+                                  prefixIcon: Icons.phone_android_outlined)
+                              .copyWith(hintText: 'scout-device-01'),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: state.pinController,
-                        decoration: const InputDecoration(
-                          labelText: 'PIN',
-                          prefixIcon: Icon(Icons.lock),
+                        const SizedBox(height: 16),
+                        Text('PIN', style: kLabel(color: kTextSecondary)),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: state.pinController,
+                          obscureText: true,
+                          keyboardType: TextInputType.number,
+                          style: kBody(),
+                          decoration: inputDeco(prefixIcon: Icons.lock_outline)
+                              .copyWith(hintText: '••••'),
                         ),
-                        obscureText: true,
-                      ),
-                      const SizedBox(height: 24),
-                      if (state.errorMessage != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 16),
-                          child: Text(
-                            state.errorMessage!,
-                            style: const TextStyle(
-                              color: Colors.redAccent,
-                              fontWeight: FontWeight.w600,
+                        if (state.errorMessage != null) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: kError.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(kRadius),
+                              border:
+                                  Border.all(color: kError.withOpacity(0.25)),
+                            ),
+                            child: Text(
+                              state.errorMessage!,
+                              style: kCaption(color: kError),
                             ),
                           ),
-                        ),
-                      FilledButton(
-                        onPressed: state.isLoading
-                            ? null
-                            : () async {
-                                final success = await viewModel.submitLogin();
-                                if (!success || !context.mounted) return;
-                                Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute(
-                                    builder: (_) => const HomeScreen(),
+                        ],
+                        const SizedBox(height: 20),
+                        ElevatedButton(
+                          onPressed: state.isLoading
+                              ? null
+                              : () async {
+                                  final success =
+                                      await viewModel.submitLogin();
+                                  if (!success || !context.mounted) return;
+                                  Navigator.of(context).pushReplacement(
+                                    MaterialPageRoute(
+                                      builder: (_) => const HomeScreen(),
+                                    ),
+                                  );
+                                },
+                          child: state.isLoading
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
                                   ),
-                                );
-                              },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E7D32),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                                )
+                              : const Text('Sign in'),
                         ),
-                        child: state.isLoading
-                            ? const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Sign in'),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 22),
-                const Text(
-                  '© 2026 Florisynergy Scouting. All rights reserved.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Color(0xFF8A9A88)),
-                ),
-              ],
+                  const SizedBox(height: 20),
+                  Center(
+                    child: Text(
+                      '© 2026 FloriSynergy Scouting',
+                      style: kCaption(),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _StyledCard extends StatelessWidget {
-  const _StyledCard({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      color: Colors.white,
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      child: Padding(padding: const EdgeInsets.all(20), child: child),
     );
   }
 }
