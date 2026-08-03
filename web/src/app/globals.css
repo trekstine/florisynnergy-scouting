@@ -138,3 +138,13 @@
     opacity: 0.3;
   }
 }
+
+/* Wallboard scene-rotation progress bar. */
+@keyframes tv-progress {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}

@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronRight, LogOut, MapPin } from "lucide-react";
+import { ChevronRight, LogOut, MapPin, MonitorPlay } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import type { SessionUser } from "@/lib/types";
@@ -69,6 +70,15 @@ export function Topbar({ user }: { user: SessionUser | null }) {
 
       <div className="flex items-center gap-4">
         <p className="hidden text-xs font-medium text-ink-faint lg:block">{today}</p>
+        <Link
+          href="/tv"
+          target="_blank"
+          title="Open the farm wallboard (for an office TV)"
+          className="flex h-8 items-center gap-1.5 rounded-lg border border-line px-2.5 text-xs font-semibold text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+        >
+          <MonitorPlay size={14} />
+          <span className="hidden xl:inline">Wallboard</span>
+        </Link>
         <div className="h-5 w-px bg-line" />
         <div className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-800 text-xs font-bold text-white">
