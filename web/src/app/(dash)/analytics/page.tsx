@@ -1,7 +1,15 @@
 "use client";
 
 import clsx from "clsx";
-import { Download } from "lucide-react";
+import {
+  AlertTriangle,
+  Bug,
+  Building2,
+  Download,
+  ShieldCheck,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -52,19 +60,21 @@ import type { Filters, ScoutingRecord, SprayRecord } from "@/lib/types";
 
 // ── Report registry ─────────────────────────────────────────────────────
 const TABS = [
-  { id: "overview", label: "Overview", blurb: "The big picture of all scouting and spray activity." },
-  { id: "table", label: "Table", blurb: "All records in a structured table for review." },
-  { id: "greenhouses", label: "Greenhouses", blurb: "Compare performance and issues by greenhouse." },
-  { id: "trends", label: "Trends", blurb: "Whether problems are increasing or decreasing." },
-  { id: "movement", label: "Movement", blurb: "Scout movement and activity across locations." },
-  { id: "spray", label: "Spray Overview", blurb: "Spray programs and their timing." },
-  { id: "coverage", label: "Coverage", blurb: "How much area or crop coverage is being addressed." },
-  { id: "cost", label: "Cost", blurb: "Spray spending and financial impact." },
-  { id: "variety-pests", label: "Variety Pests", blurb: "Pest and disease pressure by variety." },
-  { id: "gh-cost", label: "Greenhouse Cost", blurb: "Where the highest spray costs are going." },
-  { id: "chemicals", label: "Chemicals", blurb: "Which chemicals are being used most." },
-  { id: "variety-cost", label: "Variety Cost", blurb: "Which varieties are driving spray spend." },
+  { id: "overview", group: "", label: "Overview", blurb: "The big picture of all scouting and spray activity." },
+  { id: "table", group: "Scouting", label: "Detail table", blurb: "Every field observation in range, with resolved names and scores." },
+  { id: "greenhouses", group: "Scouting", label: "Greenhouses", blurb: "Compare performance and issues by greenhouse." },
+  { id: "trends", group: "Scouting", label: "Trends", blurb: "Whether problems are increasing or decreasing." },
+  { id: "variety-pests", group: "Scouting", label: "Varieties", blurb: "Pest and disease pressure by variety." },
+  { id: "movement", group: "Scouting", label: "Movement", blurb: "Scout movement and activity across locations." },
+  { id: "spray", group: "Spray", label: "Programs", blurb: "Spray programs and their timing." },
+  { id: "coverage", group: "Spray", label: "Coverage", blurb: "How much area or crop coverage is being addressed." },
+  { id: "cost", group: "Spray", label: "Cost", blurb: "Spray spending and financial impact." },
+  { id: "gh-cost", group: "Spray", label: "Cost by greenhouse", blurb: "Where the highest spray costs are going." },
+  { id: "chemicals", group: "Spray", label: "Chemicals", blurb: "Which chemicals are being used most." },
+  { id: "variety-cost", group: "Spray", label: "Cost by variety", blurb: "Which varieties are driving spray spend." },
 ] as const;
+
+const TAB_GROUPS = ["Scouting", "Spray"] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
@@ -477,19 +487,24 @@ export default function AnalyticsPage() {
       label: "Reports",
       value: summary.data ? summary.data.records.value.toLocaleString() : "—",
       hint: deltaHint(summary.data?.records.delta_pct),
+      pct: summary.data?.records.delta_pct,
     },
     {
       label: "Avg severity",
       value: summary.data ? summary.data.avg_severity.value.toFixed(1) : "—",
       hint: deltaHint(summary.data?.avg_severity.delta_pct),
+      pct: summary.data?.avg_severity.delta_pct,
+      invert: true,
     },
     {
       label: "Over threshold",
       value: summary.data ? summary.data.over_threshold.value.toLocaleString() : "—",
       hint: deltaHint(summary.data?.over_threshold.delta_pct),
+      pct: summary.data?.over_threshold.delta_pct,
+      invert: true,
     },
     {
-      label: "Open recommendations",
+      label: "Open recs",
       value: summary.data ? summary.data.open_recommendations.toLocaleString() : "—",
       hint: "Needs follow-up",
     },
@@ -497,13 +512,76 @@ export default function AnalyticsPage() {
       label: "Active scouts",
       value: summary.data ? summary.data.active_scouts.value.toLocaleString() : "—",
       hint: deltaHint(summary.data?.active_scouts.delta_pct),
+      pct: summary.data?.active_scouts.delta_pct,
     },
     {
       label: "Spray spend",
       value: summary.data ? money(summary.data.spray_cost.value) : "—",
       hint: deltaHint(summary.data?.spray_cost.delta_pct),
+      pct: summary.data?.spray_cost.delta_pct,
+      invert: true,
     },
   ];
+
+  /** Greenhouses ranked by average severity — the "where to look" list. */
+  const ghLeaderboard = useMemo(
+    () =>
+      [...(ghBreak.data ?? [])]
+        .sort((a, b) => b.avg_severity - a.avg_severity || b.records - a.records)
+        .slice(0, 8),
+    [ghBreak.data],
+  );
+
+  /**
+   * The actionable triage row. Each entry only appears when it's actually
+   * non-zero, so an "all clear" window shows an all-clear state rather than
+   * three zeroes dressed up as alerts.
+   */
+  const attention = useMemo(() => {
+    const items: {
+      label: string;
+      value: string;
+      hint: string;
+      color: string;
+      icon: typeof AlertTriangle;
+      go: () => void;
+    }[] = [];
+    const overEtl = summary.data?.over_threshold.value ?? 0;
+    const openRecs = summary.data?.open_recommendations ?? 0;
+    const hotBlocks = (ghBreak.data ?? []).filter((g) => g.over_threshold > 0).length;
+
+    if (overEtl > 0) {
+      items.push({
+        label: "Records over threshold",
+        value: overEtl.toLocaleString(),
+        hint: "Severity at or above the pest/disease ETL",
+        color: "#dc2626",
+        icon: AlertTriangle,
+        go: () => setActiveTab("table"),
+      });
+    }
+    if (openRecs > 0) {
+      items.push({
+        label: "Open recommendations",
+        value: openRecs.toLocaleString(),
+        hint: "Raised automatically, awaiting action",
+        color: "#f59e0b",
+        icon: Bug,
+        go: () => setActiveTab("greenhouses"),
+      });
+    }
+    if (hotBlocks > 0) {
+      items.push({
+        label: "Blocks with breaches",
+        value: hotBlocks.toLocaleString(),
+        hint: "Greenhouses with at least one over-ETL record",
+        color: "#7c3aed",
+        icon: Building2,
+        go: () => setActiveTab("greenhouses"),
+      });
+    }
+    return items;
+  }, [summary.data, ghBreak.data]);
 
   const sprayGlanceCards = [
     { label: "Spray applications", value: filteredSpray.length.toLocaleString(), hint: "In selected range" },
@@ -517,106 +595,269 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-5 pb-10">
       <PageHeader
-        title="Reports Overview"
-        subtitle="A breakdown of all report types and what each one helps us understand."
+        title="Analytics"
+        subtitle="Scouting pressure, threshold breaches and spray spend across the farm."
       />
       <div className="px-6">
         <FilterBar value={filters} onChange={setFilters} />
       </div>
 
-      <div className="sticky top-0 z-10 -mx-0 border-b border-line bg-white/95 px-6 backdrop-blur">
-        <nav className="flex gap-1 overflow-x-auto py-2">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setActiveTab(t.id)}
-              className={clsx(
-                "whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors",
-                activeTab === t.id ? "bg-brand-600 text-white" : "text-ink-soft hover:bg-surface",
-              )}
-            >
-              {t.label}
-            </button>
+      {/* Grouped report nav — scouting and spray reports were previously one
+          undifferentiated row of twelve pills. */}
+      <div className="sticky top-0 z-10 border-b border-line bg-white/95 px-6 backdrop-blur">
+        <nav className="flex items-center gap-4 overflow-x-auto py-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("overview")}
+            className={clsx(
+              "whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors",
+              activeTab === "overview"
+                ? "bg-brand-600 text-white"
+                : "text-ink-soft hover:bg-surface",
+            )}
+          >
+            Overview
+          </button>
+
+          {TAB_GROUPS.map((group) => (
+            <div key={group} className="flex items-center gap-1">
+              <span className="mr-1 border-l border-line pl-4 text-[10px] font-bold uppercase tracking-[0.14em] text-ink-faint">
+                {group}
+              </span>
+              {TABS.filter((t) => t.group === group).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setActiveTab(t.id)}
+                  className={clsx(
+                    "whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
+                    activeTab === t.id
+                      ? "bg-brand-600 text-white"
+                      : "text-ink-soft hover:bg-surface",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
       </div>
 
-      <div className="px-6 text-sm text-ink-faint">{activeTabMeta.blurb}</div>
+      {activeTab !== "overview" && (
+        <div className="px-6 text-sm text-ink-faint">{activeTabMeta.blurb}</div>
+      )}
 
       {activeTab === "overview" && (
         <>
+          {/* ── Headline KPIs ── */}
+          <div className="grid grid-cols-2 gap-3 px-6 lg:grid-cols-3 xl:grid-cols-6">
+            {summaryCards.map((item) => (
+              <Kpi key={item.label} {...item} loading={summary.isLoading} />
+            ))}
+          </div>
+
+          {/* ── What needs attention — the actionable read ── */}
           <div className="px-6">
             <Card>
-              <CardHeader title="Quick summary" subtitle="Scouting activity in the current window." />
-              <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-                {summaryCards.map((item) => (
-                  <StatTile key={item.label} {...item} loading={summary.isLoading} />
-                ))}
-              </div>
+              <CardHeader
+                title="Needs attention"
+                subtitle="Where to look first in the selected window."
+              />
+              {attention.length === 0 ? (
+                <div className="flex items-center gap-3 p-4">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50">
+                    <ShieldCheck size={17} className="text-brand-600" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold text-ink">All clear</p>
+                    <p className="text-xs text-ink-faint">
+                      Nothing over threshold and no open recommendations in range.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-3 p-4 md:grid-cols-3">
+                  {attention.map((a) => (
+                    <button
+                      key={a.label}
+                      type="button"
+                      onClick={a.go}
+                      className="flex items-start gap-3 rounded-lg border border-line p-3 text-left transition-colors hover:border-brand-300 hover:bg-surface"
+                    >
+                      <span
+                        className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                        style={{ backgroundColor: `${a.color}14` }}
+                      >
+                        <a.icon size={16} style={{ color: a.color }} />
+                      </span>
+                      <div className="min-w-0">
+                        <p
+                          className="text-xl font-bold leading-none tabular-nums"
+                          style={{ color: a.color }}
+                        >
+                          {a.value}
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-ink">{a.label}</p>
+                        <p className="text-xs text-ink-faint">{a.hint}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </Card>
           </div>
 
-          <div className="px-6">
-            <Card>
-              <CardHeader title="Spray at a glance" subtitle="Spray activity in the current window." />
-              <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-                {sprayGlanceCards.map((item) => (
-                  <StatTile key={item.label} {...item} loading={spray.isLoading} />
-                ))}
+          {/* ── Trend + composition ── */}
+          <div className="grid grid-cols-1 gap-5 px-6 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader
+                title="Scouting trend"
+                subtitle="Volume, threshold breaches and average severity over time."
+              />
+              <div className="p-4">
+                {trend.isLoading ? (
+                  <Spinner />
+                ) : (trend.data ?? []).length === 0 ? (
+                  <EmptyState>No scouting records in range.</EmptyState>
+                ) : (
+                  <TrendChart data={trend.data ?? []} height={240} />
+                )}
               </div>
             </Card>
-          </div>
-
-          <div className="px-6">
             <Card>
-              <CardHeader title="Scouting composition" subtitle="Records by scouting type in the current window." />
+              <CardHeader title="By scouting type" />
               <div className="p-4">
                 {summary.isLoading ? (
                   <Spinner />
                 ) : scoutingByType.length === 0 ? (
+                  <EmptyState>No records.</EmptyState>
+                ) : (
+                  <Donut data={scoutingByType} height={190} showKey />
+                )}
+              </div>
+            </Card>
+          </div>
+
+          {/* ── Pests vs diseases ── */}
+          <div className="grid grid-cols-1 gap-5 px-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader title="Top pests" subtitle="By records in range" />
+              <div className="p-4">
+                {pestBreak.isLoading ? (
+                  <Spinner />
+                ) : (pestBreak.data ?? []).length === 0 ? (
+                  <EmptyState>No pest records in range.</EmptyState>
+                ) : (
+                  <HBarChart
+                    data={(pestBreak.data ?? []).slice(0, 6).map((r) => ({ label: r.key, value: r.records }))}
+                    height={190}
+                    seriesLabel="Records"
+                  />
+                )}
+              </div>
+            </Card>
+            <Card>
+              <CardHeader title="Top diseases" subtitle="By records in range" />
+              <div className="p-4">
+                {diseaseBreak.isLoading ? (
+                  <Spinner />
+                ) : (diseaseBreak.data ?? []).length === 0 ? (
+                  <EmptyState>No disease records in range.</EmptyState>
+                ) : (
+                  <HBarChart
+                    data={(diseaseBreak.data ?? []).slice(0, 6).map((r) => ({ label: r.key, value: r.records }))}
+                    height={190}
+                    color="#f59e0b"
+                    seriesLabel="Records"
+                  />
+                )}
+              </div>
+            </Card>
+          </div>
+
+          {/* ── Greenhouse leaderboard — ranked, not just charted ── */}
+          <div className="px-6">
+            <Card>
+              <CardHeader
+                title="Pressure by greenhouse"
+                subtitle="Ranked by average severity — the blocks carrying the most pressure."
+                actions={
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("greenhouses")}
+                    className="text-sm font-semibold text-brand-700 hover:underline"
+                  >
+                    Full report →
+                  </button>
+                }
+              />
+              <div className="p-4">
+                {ghBreak.isLoading ? (
+                  <Spinner />
+                ) : ghLeaderboard.length === 0 ? (
                   <EmptyState>No scouting records in range.</EmptyState>
                 ) : (
-                  <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-                    <div className="w-full max-w-[220px]">
-                      <Donut data={scoutingByType} height={200} />
-                    </div>
-                    <div className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-1">
-                      {scoutingByType.map((t) => (
-                        <div key={t.name} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface/70 px-3 py-2">
-                          <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: t.color }} />
-                            <span className="text-sm capitalize text-ink-soft">{t.name}</span>
+                  <div className="space-y-1.5">
+                    {ghLeaderboard.map((g) => (
+                      <div key={g.key} className="flex items-center gap-3">
+                        <span className="w-20 shrink-0 truncate text-sm font-medium text-ink">
+                          {g.key}
+                        </span>
+                        <div className="h-6 flex-1 overflow-hidden rounded-md bg-surface">
+                          <div
+                            className="flex h-full items-center justify-end rounded-md px-2"
+                            style={{
+                              width: `${Math.max(6, (g.avg_severity / 5) * 100)}%`,
+                              backgroundColor: severityHex(Math.round(g.avg_severity)),
+                            }}
+                          >
+                            <span className="text-[11px] font-bold text-white">
+                              {g.avg_severity.toFixed(1)}
+                            </span>
                           </div>
-                          <span className="text-sm font-semibold tabular-nums text-ink">{t.value}</span>
                         </div>
-                      ))}
-                    </div>
+                        <span className="w-24 shrink-0 text-right text-xs text-ink-faint">
+                          {g.records} rec
+                          {g.over_threshold > 0 && (
+                            <span className="ml-1 font-semibold text-red-600">
+                              · {g.over_threshold} ETL
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             </Card>
           </div>
 
+          {/* ── Spray strip — compact, links to the spray reports ── */}
           <div className="px-6">
             <Card>
               <CardHeader
-                title="Jump to a report"
-                subtitle="Every report below, one tap away."
-              />
-              <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-                {TABS.filter((t) => t.id !== "overview").map((t) => (
+                title="Spray at a glance"
+                subtitle="Application activity in the current window."
+                actions={
                   <button
-                    key={t.id}
                     type="button"
-                    onClick={() => setActiveTab(t.id)}
-                    className="rounded-lg border border-line bg-surface/70 p-4 text-left transition-colors hover:border-brand-300 hover:bg-white"
+                    onClick={() => setActiveTab("spray")}
+                    className="text-sm font-semibold text-brand-700 hover:underline"
                   >
-                    <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-                      {t.label}
-                    </div>
-                    <div className="mt-1 text-sm text-ink-soft">{t.blurb}</div>
+                    Spray reports →
                   </button>
+                }
+              />
+              <div className="grid grid-cols-2 divide-line p-4 md:grid-cols-4 md:divide-x">
+                {sprayGlanceCards.map((item) => (
+                  <div key={item.label} className="px-4 py-1 first:pl-0">
+                    <p className="text-xl font-bold tabular-nums text-ink">
+                      {spray.isLoading ? "—" : item.value}
+                    </p>
+                    <p className="mt-0.5 text-xs font-medium text-ink-soft">{item.label}</p>
+                    <p className="text-[11px] text-ink-faint">{item.hint}</p>
+                  </div>
                 ))}
               </div>
             </Card>
@@ -1185,6 +1426,53 @@ function StatTile({
       </div>
       <div className="mt-1 text-sm text-ink-faint">{hint}</div>
     </div>
+  );
+}
+
+/**
+ * Headline metric with a period-over-period delta. `invert` marks metrics
+ * where "up" is bad (severity, breaches, cost) so the arrow colour reads
+ * correctly without the user having to think about it.
+ */
+function Kpi({
+  label,
+  value,
+  hint,
+  pct,
+  invert = false,
+  loading,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  pct?: number | null;
+  invert?: boolean;
+  loading?: boolean;
+}) {
+  const up = (pct ?? 0) > 0;
+  const good = pct == null || pct === 0 ? null : invert ? !up : up;
+
+  return (
+    <Card className="p-4">
+      <p className="text-xs font-medium text-ink-faint">{label}</p>
+      <div className="mt-1.5 flex items-baseline gap-2">
+        <span className="text-2xl font-bold tabular-nums text-ink">
+          {loading ? "—" : value}
+        </span>
+        {pct != null && pct !== 0 && (
+          <span
+            className={clsx(
+              "flex items-center gap-0.5 text-xs font-semibold",
+              good ? "text-brand-600" : "text-red-600",
+            )}
+          >
+            {up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+            {Math.abs(pct).toFixed(0)}%
+          </span>
+        )}
+      </div>
+      <p className="mt-1 text-[11px] text-ink-faint">{hint}</p>
+    </Card>
   );
 }
 
