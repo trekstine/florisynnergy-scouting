@@ -50,13 +50,17 @@ class LoginViewModel extends StateNotifier<LoginViewState> {
 
     try {
       await api.healthCheck();
-      final token = await api.login(
+      final result = await api.login(
         state.deviceIdController.text.trim(),
         state.pinController.text.trim(),
       );
       await AuthSessionStore().saveSession(
         deviceId: state.deviceIdController.text.trim(),
-        token: token,
+        token: result.token,
+        baseUrl: state.baseUrlController.text.trim(),
+        employeeId: result.employeeId,
+        name: result.name,
+        role: result.role,
       );
       return true;
     } catch (error) {

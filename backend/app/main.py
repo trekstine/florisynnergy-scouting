@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from . import API_V1_PREFIX
 from .config import get_settings
@@ -14,6 +15,7 @@ from .routers import (
     auth,
     etl_rules,
     farms,
+    media,
     recommendations,
     reference,
     scouting,
@@ -51,6 +53,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+media.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=media.MEDIA_DIR), name="media")
+
 
 @app.get("/health", tags=["meta"])
 async def health():
@@ -67,3 +72,4 @@ app.include_router(spray.router, prefix=API_V1_PREFIX)
 app.include_router(analytics.router, prefix=API_V1_PREFIX)
 app.include_router(recommendations.router, prefix=API_V1_PREFIX)
 app.include_router(etl_rules.router, prefix=API_V1_PREFIX)
+app.include_router(media.router, prefix=API_V1_PREFIX)

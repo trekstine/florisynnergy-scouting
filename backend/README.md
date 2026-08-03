@@ -42,7 +42,7 @@ varieties/pests/diseases/chemicals, 4 scouts, ~5 days of scouting):
 | Role       | device_identifier  | PIN  |
 |------------|--------------------|------|
 | Admin      | `web-admin`        | 0000 |
-| Supervisor | `sup-device-01`    | 1234 |
+| Supervisor | `sup-device-01`    | 1234 | =
 | Scout 1–4  | `scout-device-0N`  | 20N  |
 
 ## Key endpoints (`/api/v1`)

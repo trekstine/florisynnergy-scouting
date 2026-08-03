@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'auth_store.dart';
+import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 
 void main() {
@@ -40,7 +42,27 @@ class ScoutApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const ScoutLoginScreen(),
+      home: const _LaunchGate(),
+    );
+  }
+}
+
+/// Skips straight to the home screen for a scout who's already signed in —
+/// re-entering a device PIN every time the app is reopened mid-shift is
+/// exactly the kind of friction this rebuild is meant to remove.
+class _LaunchGate extends StatelessWidget {
+  const _LaunchGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder(
+      future: AuthSessionStore().loadSession(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        return snapshot.data != null ? const HomeScreen() : const ScoutLoginScreen();
+      },
     );
   }
 }

@@ -1,0 +1,67 @@
+# Production stack for a single host (e.g. one EC2 instance).
+#   caddy (public :80/:443) → web (:3000) → api (:8000) → db (:5432)
+# Only caddy publishes ports; api and db stay on the internal network.
+#
+#   cp .env.prod.example .env    # then fill in secrets + DOMAIN
+#   docker compose -f docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: flori
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: flori_scouting
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flori -d flori_scouting"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flori:${POSTGRES_PASSWORD}@db:5432/flori_scouting
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      CORS_ORIGINS: https://${DOMAIN}
+      SEED_ON_STARTUP: "${SEED_ON_STARTUP:-true}"
+    volumes:
+      - media_data:/app/media
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    depends_on:
+      - api
+    environment:
+      # Server-side only; the browser never sees the API directly.
+      FLORI_API_URL: http://api:8000
+      NODE_ENV: production
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  media_data:
+  caddy_data:
+  caddy_config:

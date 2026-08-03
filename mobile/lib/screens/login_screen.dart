@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../view_models/login_view_model.dart';
-import 'capture_screen.dart';
+import 'home_screen.dart';
 
 class ScoutLoginScreen extends ConsumerWidget {
   const ScoutLoginScreen({super.key});
@@ -98,7 +98,7 @@ class ScoutLoginScreen extends ConsumerWidget {
                                 if (!success || !context.mounted) return;
                                 Navigator.of(context).pushReplacement(
                                   MaterialPageRoute(
-                                    builder: (_) => const ScoutCaptureScreen(),
+                                    builder: (_) => const HomeScreen(),
                                   ),
                                 );
                               },
