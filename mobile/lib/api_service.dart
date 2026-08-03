@@ -99,10 +99,15 @@ Map<String, dynamic> buildBatchPayload({
   };
 }
 
+/// Production backend — the single default for the whole app. Scouts can
+/// still override it on the login screen (e.g. to point a test device at a
+/// local dev server).
+const String kDefaultBaseUrl = 'https://34.122.165.134.nip.io';
+
 class ApiService {
   ApiService({String? baseUrl})
     : _baseUrl = (baseUrl == null || baseUrl.isEmpty)
-          ? 'http://192.168.1.10:8000'
+          ? kDefaultBaseUrl
           : baseUrl;
 
   final String _baseUrl;

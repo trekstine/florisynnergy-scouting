@@ -1,6 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Network access for login, reference sync, and photo upload (required
+         in the MAIN manifest for release builds — debug adds its own). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- GPS tagging of scouting records. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- NOTE: deliberately NO android.permission.CAMERA here. image_picker
+         launches the system camera app via intent, which needs no permission.
+         Declaring CAMERA would force a runtime-permission flow we don't have,
+         making every capture fail with camera_access_denied. -->
     <application
         android:label="florisynergy_scouting_mobile"
         android:name="${applicationName}"

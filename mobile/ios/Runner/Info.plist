@@ -49,5 +49,7 @@
 	<string>This app needs camera access to capture scouting photos.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app uses your location to tag scouting reports.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>This app needs photo library access to attach existing photos to scouting reports.</string>
 </dict>
 </plist>

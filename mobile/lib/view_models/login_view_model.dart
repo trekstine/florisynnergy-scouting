@@ -17,12 +17,10 @@ class LoginViewState {
     this.isLoading = false,
     this.errorMessage,
   }) : baseUrlController = TextEditingController(
-         text: baseUrl ?? 'http://10.0.2.2:8000',
+         text: baseUrl ?? kDefaultBaseUrl,
        ),
-       deviceIdController = TextEditingController(
-         text: deviceId ?? 'scout-device-01',
-       ),
-       pinController = TextEditingController(text: pin ?? '2001');
+       deviceIdController = TextEditingController(text: deviceId ?? ''),
+       pinController = TextEditingController(text: pin ?? '');
 
   final TextEditingController baseUrlController;
   final TextEditingController deviceIdController;
