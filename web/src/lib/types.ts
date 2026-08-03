@@ -103,6 +103,7 @@ export interface ScoutingRecord {
   lure_bug_count: number;
   beneficials_count: number;
   notes: string | null;
+  session_comment: string | null;
   image_url: string | null;
   gps_lat: number | null;
   gps_lng: number | null;
@@ -227,6 +228,8 @@ export interface Filters {
   end?: string;
   greenhouse_id?: number;
   pest_id?: number;
+  disease_id?: number;
+  variety_code?: string;
   scouting_for?: ScoutingFor | "";
 }
 

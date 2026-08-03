@@ -33,9 +33,21 @@ def _filters(
     end: date | None = Query(default=None),
     greenhouse_id: int | None = Query(default=None),
     pest_id: int | None = Query(default=None),
+    disease_id: int | None = Query(default=None),
+    variety_code: str | None = Query(default=None),
     scouting_for: str | None = Query(default=None),
 ) -> Filters:
-    return Filters(start, end, greenhouse_id, pest_id, scouting_for)
+    # Keyword args — Filters gained fields in the middle, so positional
+    # construction would silently mis-map them.
+    return Filters(
+        start=start,
+        end=end,
+        greenhouse_id=greenhouse_id,
+        pest_id=pest_id,
+        disease_id=disease_id,
+        variety_code=variety_code,
+        scouting_for=scouting_for,
+    )
 
 
 @router.get("/summary", response_model=AnalyticsSummary)

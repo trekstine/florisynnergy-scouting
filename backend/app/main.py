@@ -26,11 +26,22 @@ from .seed import seed_if_empty
 settings = get_settings()
 
 
+# Additive column migrations. `create_all` only creates missing *tables* —
+# it never alters an existing one, so a column added to a model after the
+# first deploy would be missing in production. Each statement is idempotent
+# (IF NOT EXISTS), so this is safe to run on every boot.
+_COLUMN_MIGRATIONS = (
+    "ALTER TABLE scouting_records ADD COLUMN IF NOT EXISTS session_comment TEXT;",
+)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     async with engine.begin() as conn:
         await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS postgis;")
         await conn.run_sync(Base.metadata.create_all)
+        for stmt in _COLUMN_MIGRATIONS:
+            await conn.exec_driver_sql(stmt)
     if settings.seed_on_startup:
         async with AsyncSessionLocal() as db:
             await seed_if_empty(db)

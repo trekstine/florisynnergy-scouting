@@ -215,9 +215,20 @@ class ScoutingRecordSummary {
     this.varietyCode,
     this.pestId,
     this.diseaseId,
+    this.stage,
+    this.locationOnPlant,
+    this.fcmCount = 0,
+    this.stickyTrapBugCount = 0,
+    this.lureBugCount = 0,
+    this.beneficialsCount = 0,
     this.notes,
+    this.sessionComment,
     this.imageUrl,
+    this.verificationMethod = 'gps',
     this.flagged = false,
+    this.flagReason,
+    this.gpsLat,
+    this.gpsLng,
   });
 
   final int id;
@@ -229,9 +240,23 @@ class ScoutingRecordSummary {
   final String? varietyCode;
   final int? pestId;
   final int? diseaseId;
+  final String? stage;
+  final String? locationOnPlant;
+  final int fcmCount;
+  final int stickyTrapBugCount;
+  final int lureBugCount;
+  final int beneficialsCount;
   final String? notes;
+  final String? sessionComment;
   final String? imageUrl;
+  final String verificationMethod;
   final bool flagged;
+  final String? flagReason;
+  final double? gpsLat;
+  final double? gpsLng;
+
+  /// Total insects counted across the count-style fields.
+  int get totalCount => fcmCount + stickyTrapBugCount + lureBugCount;
 
   factory ScoutingRecordSummary.fromJson(Map<String, dynamic> json) {
     return ScoutingRecordSummary(
@@ -244,9 +269,20 @@ class ScoutingRecordSummary {
       varietyCode: json['variety_code'] as String?,
       pestId: json['pest_id'] as int?,
       diseaseId: json['disease_id'] as int?,
+      stage: json['stage'] as String?,
+      locationOnPlant: json['location_on_plant'] as String?,
+      fcmCount: json['fcm_count'] as int? ?? 0,
+      stickyTrapBugCount: json['sticky_trap_bug_count'] as int? ?? 0,
+      lureBugCount: json['lure_bug_count'] as int? ?? 0,
+      beneficialsCount: json['beneficials_count'] as int? ?? 0,
       notes: json['notes'] as String?,
+      sessionComment: json['session_comment'] as String?,
       imageUrl: json['image_url'] as String?,
+      verificationMethod: json['verification_method'] as String? ?? 'gps',
       flagged: json['flagged'] as bool? ?? false,
+      flagReason: json['flag_reason'] as String?,
+      gpsLat: (json['gps_lat'] as num?)?.toDouble(),
+      gpsLng: (json['gps_lng'] as num?)?.toDouble(),
     );
   }
 }

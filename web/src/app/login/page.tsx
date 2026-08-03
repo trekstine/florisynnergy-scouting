@@ -1,91 +1,135 @@
 "use client";
 
-import { MapPin, ShieldCheck, Smartphone } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 import { Logo, LogoMark } from "@/components/Logo";
-import { Button, ErrorBox, Field, TextInput } from "@/components/ui";
+import { ErrorBox } from "@/components/ui";
 
-/** Decorative brand panel — pure SVG/CSS, no image assets to ship. */
-function BrandPanel() {
+/* ────────────────────────────────────────────────────────────────────────
+   Brand canvas: a stylised live view of the farm — greenhouse beds that
+   breathe with pest pressure, swept by a geofence radar, with pollen
+   drifting up the panel. The product's own visual language as artwork.
+
+   Deterministic by design: no Math.random and no Date at render time, so
+   server and client markup match and nothing hydrates twice.
+   ──────────────────────────────────────────────────────────────────────── */
+
+const COLS = 9;
+const ROWS = 6;
+const PRESSURE = ["#10b981", "#34d399", "#f59e0b", "#dc2626"] as const;
+
+/** Deterministic pseudo-random in [0,1) — stable across server & client. */
+function hash(n: number): number {
+  const x = Math.sin(n * 127.1) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const BEDS = Array.from({ length: COLS * ROWS }, (_, i) => {
+  const h = hash(i);
+  // Mostly healthy with a few hot spots — reads as a real farm, not noise.
+  const level = h > 0.93 ? 3 : h > 0.82 ? 2 : h > 0.5 ? 1 : 0;
+  return {
+    i,
+    color: PRESSURE[level],
+    delay: `${(hash(i + 99) * 5.5).toFixed(2)}s`,
+    base: level === 0 ? 0.16 : level === 1 ? 0.3 : 0.55,
+  };
+});
+
+const POLLEN = Array.from({ length: 12 }, (_, i) => ({
+  i,
+  left: `${(hash(i + 7) * 96).toFixed(1)}%`,
+  size: 2 + Math.round(hash(i + 23) * 4),
+  duration: `${(14 + hash(i + 41) * 12).toFixed(1)}s`,
+  delay: `${(hash(i + 61) * 14).toFixed(1)}s`,
+}));
+
+function LiveFarmCanvas() {
   return (
-    <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-800 via-brand-900 to-[#022c1c] p-10 lg:flex lg:w-[46%]">
-      {/* oversized watermark bloom */}
-      <svg
-        className="pointer-events-none absolute -bottom-40 -right-40 h-[560px] w-[560px] opacity-[0.07]"
-        viewBox="0 0 48 48"
-        fill="none"
-      >
-        {[0, 72, 144, 216, 288].map((deg) => (
-          <path
-            key={deg}
-            d="M24 4 C32 12 32.4 20 24 24 C15.6 20 16 12 24 4 Z"
-            fill="white"
-            transform={`rotate(${deg} 24 24)`}
-          />
-        ))}
-        <circle cx="24" cy="24" r="4" fill="white" />
-      </svg>
-      {/* dotted geofence rings */}
-      <svg
-        className="pointer-events-none absolute -left-24 top-1/3 h-96 w-96 opacity-10"
-        viewBox="0 0 100 100"
-        fill="none"
-      >
-        {[48, 36, 24].map((r) => (
-          <circle
-            key={r}
-            cx="50"
-            cy="50"
-            r={r}
-            stroke="white"
-            strokeWidth="0.7"
-            strokeDasharray="2.4 3"
-          />
-        ))}
-      </svg>
-
-      <Logo tone="light" size={40} />
-
-      <div className="relative">
-        <h2 className="max-w-md text-3xl font-bold leading-tight text-white">
-          Every bloom scouted.
-          <br />
-          Every threat <span className="text-brand-400">seen early.</span>
-        </h2>
-        <p className="mt-4 max-w-sm text-sm leading-relaxed text-white/60">
-          Geofenced field scouting, threshold-driven recommendations, and spray
-          compliance — from the greenhouse bed to this dashboard, in real time.
-        </p>
-
-        <div className="mt-8 space-y-3">
-          {[
-            {
-              icon: MapPin,
-              text: "GPS-verified capture inside greenhouse boundaries",
-            },
-            {
-              icon: ShieldCheck,
-              text: "Economic thresholds raise interventions automatically",
-            },
-            {
-              icon: Smartphone,
-              text: "Offline-first mobile app for scouts in the field",
-            },
-          ].map(({ icon: Icon, text }) => (
-            <div key={text} className="flex items-center gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10">
-                <Icon size={15} className="text-brand-400" />
-              </span>
-              <p className="text-sm font-medium text-white/80">{text}</p>
-            </div>
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="absolute left-1/2 top-1/2 h-[360px] w-[360px] -translate-x-1/2 -translate-y-1/2">
+        <div
+          className="grid h-full w-full gap-[7px]"
+          style={{
+            gridTemplateColumns: `repeat(${COLS}, 1fr)`,
+            gridTemplateRows: `repeat(${ROWS}, 1fr)`,
+            transform: "rotateX(52deg) rotateZ(-42deg)",
+          }}
+        >
+          {BEDS.map((b) => (
+            <span
+              key={b.i}
+              className="bed-tile rounded-[3px]"
+              style={{
+                backgroundColor: b.color,
+                opacity: b.base,
+                animationDelay: b.delay,
+              }}
+            />
           ))}
         </div>
+
+        <svg
+          className="absolute left-1/2 top-1/2 h-[440px] w-[440px] -translate-x-1/2 -translate-y-1/2"
+          viewBox="0 0 200 200"
+          aria-hidden
+        >
+          {[92, 68, 44].map((r) => (
+            <circle
+              key={r}
+              cx="100"
+              cy="100"
+              r={r}
+              fill="none"
+              stroke="white"
+              strokeOpacity="0.12"
+              strokeWidth="0.7"
+              strokeDasharray="2.5 3.5"
+            />
+          ))}
+        </svg>
+        <div className="radar-sweep absolute left-1/2 top-1/2 h-[440px] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-full [background:conic-gradient(from_0deg,transparent_0deg,rgba(52,211,153,0.2)_18deg,transparent_46deg)]" />
       </div>
 
-      <p className="relative text-xs text-white/35">
-        © {new Date().getFullYear()} FloriSynergy · Naivasha Rose Estate
+      {POLLEN.map((p) => (
+        <span
+          key={p.i}
+          className="pollen absolute bottom-0 rounded-full bg-brand-200"
+          style={{
+            left: p.left,
+            width: p.size,
+            height: p.size,
+            animationDuration: p.duration,
+            animationDelay: p.delay,
+          }}
+        />
+      ))}
+
+      {/* vignette so text always wins over the artwork */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,rgba(2,28,18,0.75)_100%)]" />
+    </div>
+  );
+}
+
+function BrandPanel() {
+  return (
+    <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-800 via-brand-900 to-[#021c12] p-10 lg:flex lg:w-[52%]">
+      <LiveFarmCanvas />
+
+      <div className="petal-in relative">
+        <Logo tone="light" size={38} />
+      </div>
+
+      <p className="relative max-w-sm text-[2rem] font-bold leading-[1.15] tracking-tight text-white">
+        Every bloom scouted.
+        <br />
+        <span className="text-brand-400">Every threat seen early.</span>
+      </p>
+
+      <p className="relative text-[11px] text-white/30">
+        Naivasha Rose Estate
       </p>
     </div>
   );
@@ -100,6 +144,15 @@ function LoginForm() {
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Time-of-day greeting, set after mount so SSR and client markup agree.
+  const [greeting, setGreeting] = useState("Welcome back");
+  useEffect(() => {
+    const h = new Date().getHours();
+    setGreeting(
+      h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening",
+    );
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -124,63 +177,91 @@ function LoginForm() {
     }
   }
 
+  const field =
+    "peer w-full rounded-xl border border-line bg-surface px-4 pb-2.5 pt-6 text-sm font-medium text-ink outline-none transition-all placeholder:text-transparent focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-100";
+  const label =
+    "pointer-events-none absolute left-4 top-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-sm peer-placeholder-shown:normal-case peer-placeholder-shown:tracking-normal peer-focus:top-2 peer-focus:text-[11px] peer-focus:uppercase peer-focus:tracking-wide peer-focus:text-brand-700";
+
   return (
     <div className="flex min-h-screen bg-white">
       <BrandPanel />
 
-      {/* form side */}
-      <div className="flex flex-1 items-center justify-center bg-surface p-6">
-        <div className="w-full max-w-sm">
-          {/* logo shows here on small screens where the panel is hidden */}
-          <div className="mb-8 lg:hidden">
-            <Logo size={40} />
+      <div className="flex flex-1 items-center justify-center p-6 sm:p-10">
+        <div className="rise-in w-full max-w-sm">
+          <div className="mb-9 lg:hidden">
+            <Logo size={38} />
+          </div>
+          <div className="mb-9 hidden lg:block">
+            <LogoMark size={42} />
           </div>
 
-          <div className="mb-8 hidden lg:block">
-            <LogoMark size={44} />
-          </div>
-
-          <h1 className="text-2xl font-bold tracking-tight text-ink">
-            Welcome back
+          <h1 className="text-[1.875rem] font-bold leading-tight tracking-tight text-ink">
+            {greeting}
           </h1>
           <p className="mt-1.5 text-sm text-ink-faint">
-            Sign in to the admin portal to manage your farm.
+            Sign in to continue.
           </p>
 
-          <form onSubmit={onSubmit} className="mt-8 space-y-4">
-            <ErrorBox message={error} />
-            <Field label="Device identifier">
-              <TextInput
+          <form onSubmit={onSubmit} className="mt-8 space-y-3.5">
+            {error && <ErrorBox message={error} />}
+
+            <div className="relative">
+              <input
+                id="device"
                 value={deviceId}
                 onChange={(e) => setDeviceId(e.target.value)}
-                placeholder="e.g. web-admin"
+                placeholder="device"
                 autoComplete="username"
                 required
+                className={field}
               />
-            </Field>
-            <Field label="PIN">
-              <TextInput
+              <label htmlFor="device" className={label}>
+                Device identifier
+              </label>
+            </div>
+
+            <div className="relative">
+              <input
+                id="pin"
                 type="password"
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
-                placeholder="••••"
+                placeholder="pin"
                 autoComplete="current-password"
                 inputMode="numeric"
                 required
+                className={field}
               />
-            </Field>
-            <Button type="submit" disabled={loading} className="w-full !py-2.5">
-              {loading ? "Signing in…" : "Sign in"}
-            </Button>
+              <label htmlFor="pin" className={label}>
+                PIN
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="group flex w-full items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-3.5 text-sm font-bold text-white transition-colors hover:bg-brand-800 focus:outline-none focus:ring-4 focus:ring-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  Signing in…
+                </>
+              ) : (
+                <>
+                  Sign in
+                  <ArrowRight
+                    size={16}
+                    className="transition-transform group-hover:translate-x-0.5"
+                  />
+                </>
+              )}
+            </button>
           </form>
 
-          <div className="mt-8 flex items-center gap-2 rounded-lg border border-line bg-white px-3.5 py-3">
-            <Smartphone size={16} className="shrink-0 text-brand-600" />
-            <p className="text-xs text-ink-faint">
-              Field scouts don&apos;t sign in here — they use the FloriSynergy
-              mobile app.
-            </p>
-          </div>
+          <p className="mt-8 text-xs text-ink-faint">
+            Scouts capture observations in the mobile app.
+          </p>
         </div>
       </div>
     </div>

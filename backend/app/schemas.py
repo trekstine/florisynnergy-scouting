@@ -252,6 +252,9 @@ class ScoutingBatch(BaseModel):
     """Multiple entries captured in one session, submitted at once."""
 
     batch_id: str | None = None
+    # Optional session-level remark the scout adds once, on submit; stored
+    # on every entry in the batch.
+    comments: str | None = None
     entries: list[ScoutingEntry] = Field(min_length=1)
 
 
@@ -274,6 +277,7 @@ class ScoutingOut(BaseModel):
     lure_bug_count: int
     beneficials_count: int
     notes: str | None
+    session_comment: str | None = None
     image_url: str | None
     gps_lat: float | None
     gps_lng: float | None

@@ -62,9 +62,13 @@ class LoginResult {
 Map<String, dynamic> buildBatchPayload({
   required String batchId,
   required List<QueuedScoutingEntry> entries,
+  String? comments,
 }) {
   return {
     'batch_id': batchId,
+    // Session-level remark covering the whole submission; the backend
+    // stores it on every entry in the batch.
+    'comments': comments,
     'entries': entries
         .map(
           (e) => {

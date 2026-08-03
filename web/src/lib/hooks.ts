@@ -36,13 +36,23 @@ export function filterQS(f: Filters = {}): string {
   if (f.end) qs.set("end", f.end);
   if (f.greenhouse_id) qs.set("greenhouse_id", String(f.greenhouse_id));
   if (f.pest_id) qs.set("pest_id", String(f.pest_id));
+  if (f.disease_id) qs.set("disease_id", String(f.disease_id));
+  if (f.variety_code) qs.set("variety_code", f.variety_code);
   if (f.scouting_for) qs.set("scouting_for", f.scouting_for);
   const s = qs.toString();
   return s ? `?${s}` : "";
 }
 
 const fkey = (f: Filters = {}) =>
-  [f.start, f.end, f.greenhouse_id, f.pest_id, f.scouting_for].join("|");
+  [
+    f.start,
+    f.end,
+    f.greenhouse_id,
+    f.pest_id,
+    f.disease_id,
+    f.variety_code,
+    f.scouting_for,
+  ].join("|");
 
 // ── Geofencing ──
 export const useGreenhouses = () =>

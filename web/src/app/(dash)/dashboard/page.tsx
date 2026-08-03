@@ -42,6 +42,7 @@ export default function DashboardPage() {
   const summary = useSummary(filters);
   const trend = useTrend(filters);
   const pestBreak = useBreakdown("pest", filters);
+  const diseaseBreak = useBreakdown("disease", filters);
   const sevDist = useSeverityDist(filters);
   const recs = useRecommendations();
   const pressure = usePressure(filters);
@@ -143,18 +144,39 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Breakdown + severity + recs */}
-      <div className="grid grid-cols-1 gap-5 px-6 lg:grid-cols-3">
+      {/* Pest + disease breakdown */}
+      <div className="grid grid-cols-1 gap-5 px-6 lg:grid-cols-2">
         <Card>
           <CardHeader title="Top pests" subtitle="By records in range" />
           <div className="p-4">
-            {pestBreak.isLoading ? <Spinner /> : (
+            {pestBreak.isLoading ? <Spinner /> : (pestBreak.data ?? []).length === 0 ? (
+              <EmptyState>No pest records in range.</EmptyState>
+            ) : (
               <HBarChart
                 data={(pestBreak.data ?? []).slice(0, 7).map((r) => ({ label: r.key, value: r.records }))}
+                seriesLabel="Records"
               />
             )}
           </div>
         </Card>
+        <Card>
+          <CardHeader title="Top diseases" subtitle="By records in range" />
+          <div className="p-4">
+            {diseaseBreak.isLoading ? <Spinner /> : (diseaseBreak.data ?? []).length === 0 ? (
+              <EmptyState>No disease records in range.</EmptyState>
+            ) : (
+              <HBarChart
+                data={(diseaseBreak.data ?? []).slice(0, 7).map((r) => ({ label: r.key, value: r.records }))}
+                color="#f59e0b"
+                seriesLabel="Records"
+              />
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* Severity + recs */}
+      <div className="grid grid-cols-1 gap-5 px-6 lg:grid-cols-2">
         <Card>
           <CardHeader title="Severity distribution" subtitle="0 (clean) → 5 (severe)" />
           <div className="p-4">

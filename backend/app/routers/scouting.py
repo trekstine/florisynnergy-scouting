@@ -115,6 +115,7 @@ async def submit_batch(
             lure_bug_count=e.lure_bug_count,
             beneficials_count=e.beneficials_count,
             notes=e.notes,
+            session_comment=payload.comments,
             image_url=e.image_url,
             gps_lat=e.gps_lat,
             gps_lng=e.gps_lng,

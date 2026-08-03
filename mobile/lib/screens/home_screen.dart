@@ -11,6 +11,7 @@ import '../theme.dart';
 import '../widgets/form_widgets.dart';
 import 'greenhouse_picker_screen.dart';
 import 'login_screen.dart';
+import 'scouting_detail_screen.dart';
 
 /// Main shell, ported from Bloom's MainScreen: purple app bar with the
 /// current tab's title and an account button, an IndexedStack of tabs, a
@@ -95,6 +96,20 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(builder: (_) => const GreenhousePickerScreen()),
     );
     await _refresh();
+  }
+
+  /// Opens the read-only detail view for a synced record. Shared by all
+  /// three tabs that list records, so the session (needed to resolve photo
+  /// URLs) is captured once here.
+  void _openRecord(ScoutingRecordSummary record) {
+    final session = _session;
+    if (session == null) return;
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ScoutingDetailScreen(record: record, session: session),
+      ),
+    );
   }
 
   void _showAccountSheet() {
@@ -187,15 +202,22 @@ class _HomeScreenState extends State<HomeScreen> {
         recent: _recent.take(4).toList(),
         onStartSession: _startSession,
         onRefresh: _refresh,
+        onOpenRecord: _openRecord,
       ),
       _ScoutingTab(
         loading: _loading,
         queue: _queue,
         recent: _recent,
         onRefresh: _refresh,
+        onOpenRecord: _openRecord,
       ),
       const _SprayTab(),
-      _ReportsTab(loading: _loading, recent: _recent, onRefresh: _refresh),
+      _ReportsTab(
+        loading: _loading,
+        recent: _recent,
+        onRefresh: _refresh,
+        onOpenRecord: _openRecord,
+      ),
     ];
 
     return Scaffold(
@@ -283,6 +305,7 @@ class _HomeTab extends StatelessWidget {
     required this.recent,
     required this.onStartSession,
     required this.onRefresh,
+    required this.onOpenRecord,
   });
 
   final AuthSession? session;
@@ -292,6 +315,7 @@ class _HomeTab extends StatelessWidget {
   final List<ScoutingRecordSummary> recent;
   final VoidCallback onStartSession;
   final Future<void> Function() onRefresh;
+  final void Function(ScoutingRecordSummary) onOpenRecord;
 
   @override
   Widget build(BuildContext context) {
@@ -401,7 +425,7 @@ class _HomeTab extends StatelessWidget {
             ...recent.map(
               (r) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: _RecordCard(record: r),
+                child: _RecordCard(record: r, onTap: () => onOpenRecord(r)),
               ),
             ),
         ],
@@ -418,12 +442,14 @@ class _ScoutingTab extends StatelessWidget {
     required this.queue,
     required this.recent,
     required this.onRefresh,
+    required this.onOpenRecord,
   });
 
   final bool loading;
   final List<QueuedScoutingEntry> queue;
   final List<ScoutingRecordSummary> recent;
   final Future<void> Function() onRefresh;
+  final void Function(ScoutingRecordSummary) onOpenRecord;
 
   @override
   Widget build(BuildContext context) {
@@ -499,7 +525,7 @@ class _ScoutingTab extends StatelessWidget {
             ...recent.map(
               (r) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: _RecordCard(record: r),
+                child: _RecordCard(record: r, onTap: () => onOpenRecord(r)),
               ),
             ),
         ],
@@ -530,11 +556,13 @@ class _ReportsTab extends StatelessWidget {
     required this.loading,
     required this.recent,
     required this.onRefresh,
+    required this.onOpenRecord,
   });
 
   final bool loading;
   final List<ScoutingRecordSummary> recent;
   final Future<void> Function() onRefresh;
+  final void Function(ScoutingRecordSummary) onOpenRecord;
 
   @override
   Widget build(BuildContext context) {
@@ -615,7 +643,7 @@ class _ReportsTab extends StatelessWidget {
             ...recent.map(
               (r) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: _RecordCard(record: r),
+                child: _RecordCard(record: r, onTap: () => onOpenRecord(r)),
               ),
             ),
         ],
@@ -685,9 +713,10 @@ class _StatCard extends StatelessWidget {
 // ─── Record card (Bloom's scouting list card) ─────────────────────────────────
 
 class _RecordCard extends StatelessWidget {
-  const _RecordCard({required this.record});
+  const _RecordCard({required this.record, this.onTap});
 
   final ScoutingRecordSummary record;
+  final VoidCallback? onTap;
 
   String get _primaryLabel {
     final cache = ReferenceCache.instance;
@@ -720,7 +749,10 @@ class _RecordCard extends StatelessWidget {
     final dateStr =
         '${_month(date.month)} ${date.day}';
 
-    return Container(
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(kRadiusLg),
+      child: Container(
       decoration: BoxDecoration(
         color: kBackground,
         borderRadius: BorderRadius.circular(kRadiusLg),
@@ -823,6 +855,7 @@ class _RecordCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

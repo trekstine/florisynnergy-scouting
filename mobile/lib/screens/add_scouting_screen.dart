@@ -71,6 +71,9 @@ class _AddScoutingScreenState extends State<AddScoutingScreen>
 
   // ── Queue ──
   List<QueuedScoutingEntry> _queue = [];
+  /// Session-level remark, asked once on submit and kept if a submit fails
+  /// so the scout doesn't retype it on retry.
+  String _sessionComment = '';
   bool _submitting = false;
   bool _processing = false; // uploading the photo while adding to queue
 
@@ -270,8 +273,80 @@ class _AddScoutingScreenState extends State<AddScoutingScreen>
     HapticFeedback.lightImpact();
   }
 
+  /// Bloom's pre-submit prompt: one remark covering the whole walk (weather,
+  /// spray context, anything that applies to every entry). Returns null if
+  /// the scout cancels — which aborts the submit.
+  Future<String?> _askOverallComment() {
+    final ctrl = TextEditingController(text: _sessionComment);
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(kRadiusLg),
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: kPrimary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.comment_outlined,
+                  size: 18, color: kPrimary),
+            ),
+            const SizedBox(width: 12),
+            Text('Overall Comment', style: kSubheading()),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Add a comment for this scouting session '
+              '(${_queue.length} ${_queue.length == 1 ? 'report' : 'reports'})',
+              style: kBody(color: kTextSecondary),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              maxLines: 4,
+              autofocus: true,
+              style: kBody(),
+              decoration: inputDeco().copyWith(
+                hintText: 'Enter overall comment…',
+                hintStyle: kBody(color: kTextSecondary.withOpacity(0.5)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: kLabel(color: kTextSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            style: ElevatedButton.styleFrom(minimumSize: const Size(100, 40)),
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _submitAll() async {
     if (_queue.isEmpty || _submitting) return;
+
+    // Prompt for the session comment before anything is sent.
+    final comment = await _askOverallComment();
+    if (comment == null || !mounted) return; // cancelled
+    _sessionComment = comment;
+
     setState(() => _submitting = true);
 
     try {
@@ -293,8 +368,11 @@ class _AddScoutingScreenState extends State<AddScoutingScreen>
         entries.add(entry);
       }
 
-      final payload =
-          buildBatchPayload(batchId: _uuid.v4(), entries: entries);
+      final payload = buildBatchPayload(
+        batchId: _uuid.v4(),
+        entries: entries,
+        comments: _sessionComment.isEmpty ? null : _sessionComment,
+      );
       final result = await _api.submitScoutingBatch(
         token: widget.session.token,
         payload: payload,

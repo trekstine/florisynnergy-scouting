@@ -252,6 +252,10 @@ class ScoutingRecord(Base):
     beneficials_count: Mapped[int] = mapped_column(Integer, default=0)
 
     notes: Mapped[str | None] = mapped_column(Text)
+    # Session-level remark covering the whole submitted batch (the scout is
+    # prompted once on submit). Denormalised onto every row in the batch so
+    # listing/exporting a record carries its context without a join.
+    session_comment: Mapped[str | None] = mapped_column(Text)
     image_url: Mapped[str | None] = mapped_column(Text)
 
     gps_lat: Mapped[float | None] = mapped_column(Float)

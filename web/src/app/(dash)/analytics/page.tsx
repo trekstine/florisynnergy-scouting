@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import { Download } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -25,19 +26,29 @@ import {
   Spinner,
   TextInput,
 } from "@/components/ui";
-import { money, relativeTime } from "@/lib/format";
+import {
+  SCOUTING_LABEL,
+  VERIFICATION_LABEL,
+  money,
+  relativeTime,
+  severityHex,
+} from "@/lib/format";
 import {
   useBreakdown,
+  useDiseases,
+  useEmployees,
   useGreenhouses,
   usePestMatrix,
+  usePests,
   useScouting,
   useScoutSummary,
   useSeverityDist,
   useSpray,
   useSummary,
   useTrend,
+  useVarieties,
 } from "@/lib/hooks";
-import type { Filters, SprayRecord } from "@/lib/types";
+import type { Filters, ScoutingRecord, SprayRecord } from "@/lib/types";
 
 // ── Report registry ─────────────────────────────────────────────────────
 const TABS = [
@@ -56,6 +67,17 @@ const TABS = [
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
+
+/** A scouting record joined with its resolved reference names. */
+interface ScoutingDetailRow {
+  r: ScoutingRecord;
+  greenhouse: string;
+  target: string;
+  targetKind: string;
+  variety: string;
+  scout: string;
+  count: number;
+}
 
 const SCOUTING_TYPE_COLORS: Record<string, string> = {
   pest: "#10b981",
@@ -130,12 +152,16 @@ export default function AnalyticsPage() {
   const matrix = usePestMatrix(filters);
   const scouts = useScoutSummary(filters);
   const greenhouses = useGreenhouses();
+  const pests = usePests();
+  const diseases = useDiseases();
+  const varieties = useVarieties();
+  const employees = useEmployees();
   const scouting = useScouting({
     start: filters.start,
     end: filters.end,
     greenhouse_id: filters.greenhouse_id,
     scouting_for: filters.scouting_for,
-    limit: 120,
+    limit: 1000,
   });
   const spray = useSpray();
 
@@ -144,6 +170,28 @@ export default function AnalyticsPage() {
     for (const g of greenhouses.data ?? []) m.set(g.id, g.name);
     return m;
   }, [greenhouses.data]);
+
+  // ── Reference lookups so the detail table shows names, not raw ids ──
+  const pestName = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const p of pests.data ?? []) m.set(p.id, p.name);
+    return m;
+  }, [pests.data]);
+  const diseaseName = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const d of diseases.data ?? []) m.set(d.id, d.name);
+    return m;
+  }, [diseases.data]);
+  const varietyName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const v of varieties.data ?? []) m.set(v.code, v.name);
+    return m;
+  }, [varieties.data]);
+  const scoutName = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const e of employees.data ?? []) m.set(e.id, e.name);
+    return m;
+  }, [employees.data]);
 
   // Every spray-derived report below reads from this, so they all honor
   // the same date range / greenhouse filter as the scouting reports.
@@ -167,17 +215,130 @@ export default function AnalyticsPage() {
     return { rows: [...r].sort(), cols: [...c].sort(colSort), lookup: map };
   }, [matrix.data]);
 
+  /**
+   * The detail table's row model: every scouting record joined to its
+   * resolved names (greenhouse, pest/disease, variety, scout) so the table
+   * reads like a report rather than a database dump. Client-side filters
+   * for disease/variety are applied here too — the /scouting list endpoint
+   * only accepts greenhouse/type/scout/date.
+   */
+  const detailRows: ScoutingDetailRow[] = useMemo(() => {
+    return (scouting.data ?? [])
+      .filter((r) => (filters.pest_id ? r.pest_id === filters.pest_id : true))
+      .filter((r) => (filters.disease_id ? r.disease_id === filters.disease_id : true))
+      .filter((r) =>
+        filters.variety_code ? r.variety_code === filters.variety_code : true,
+      )
+      .map((r) => {
+        const isDisease = r.disease_id != null;
+        return {
+          r,
+          greenhouse: r.greenhouse_id
+            ? (ghName.get(r.greenhouse_id) ?? `#${r.greenhouse_id}`)
+            : "—",
+          target: isDisease
+            ? (diseaseName.get(r.disease_id as number) ?? "Disease")
+            : r.pest_id != null
+              ? (pestName.get(r.pest_id) ?? "Pest")
+              : "—",
+          targetKind: isDisease ? "Disease" : r.pest_id != null ? "Pest" : "—",
+          variety: r.variety_code
+            ? (varietyName.get(r.variety_code) ?? r.variety_code)
+            : "—",
+          scout: r.scout_id ? (scoutName.get(r.scout_id) ?? `#${r.scout_id}`) : "—",
+          count:
+            r.fcm_count + r.sticky_trap_bug_count + r.lure_bug_count,
+        };
+      });
+  }, [
+    scouting.data,
+    filters.pest_id,
+    filters.disease_id,
+    filters.variety_code,
+    ghName,
+    pestName,
+    diseaseName,
+    varietyName,
+    scoutName,
+  ]);
+
   const filteredScoutingRecords = useMemo(() => {
     const q = recordSearch.trim().toLowerCase();
-    if (!q) return scouting.data ?? [];
-    return (scouting.data ?? []).filter((row) => {
-      const haystack = [row.bed_code, row.variety_code, row.notes, row.scouting_for]
+    if (!q) return detailRows;
+    return detailRows.filter((row) =>
+      [
+        row.greenhouse,
+        row.r.bed_code,
+        row.target,
+        row.variety,
+        row.scout,
+        row.r.stage,
+        row.r.location_on_plant,
+        row.r.notes,
+        row.r.session_comment,
+        SCOUTING_LABEL[row.r.scouting_for],
+      ]
         .filter(Boolean)
         .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [recordSearch, detailRows]);
+
+  function exportScoutingCsv() {
+    const head = [
+      "recorded_at",
+      "greenhouse",
+      "bed",
+      "type",
+      "target_kind",
+      "target",
+      "variety",
+      "stage",
+      "location_on_plant",
+      "severity",
+      "count",
+      "beneficials",
+      "scout",
+      "verification",
+      "flagged",
+      "notes",
+      "session_comment",
+    ];
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = filteredScoutingRecords.map((x) =>
+      [
+        x.r.recorded_at,
+        x.greenhouse,
+        x.r.bed_code ?? "",
+        SCOUTING_LABEL[x.r.scouting_for],
+        x.targetKind,
+        x.target,
+        x.variety,
+        x.r.stage ?? "",
+        x.r.location_on_plant ?? "",
+        x.r.severity,
+        x.count,
+        x.r.beneficials_count,
+        x.scout,
+        VERIFICATION_LABEL[x.r.verification_method],
+        x.r.flagged ? "yes" : "no",
+        x.r.notes ?? "",
+        x.r.session_comment ?? "",
+      ]
+        .map(esc)
+        .join(","),
+    );
+    const blob = new Blob([[head.join(","), ...lines].join("\n")], {
+      type: "text/csv",
     });
-  }, [recordSearch, scouting.data]);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `scouting_detail_${filters.start}_to_${filters.end}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const coverageBreakdown = useMemo(() => countBy(filteredSpray, (r) => r.coverage), [filteredSpray]);
   const chemicalBreakdown = useMemo(() => countBy(filteredSpray, (r) => r.product), [filteredSpray]);
@@ -467,54 +628,128 @@ export default function AnalyticsPage() {
         <div className="px-6">
           <Card>
             <CardHeader
-              title="Table report"
-              subtitle="A searchable record view for raw scouting entries and context."
+              title="Scouting detail"
+              subtitle="Every field observation in range, with resolved names, scores and context."
+              actions={
+                <button
+                  type="button"
+                  onClick={exportScoutingCsv}
+                  disabled={!filteredScoutingRecords.length}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-soft hover:bg-surface disabled:opacity-50"
+                >
+                  <Download size={14} /> Export CSV
+                </button>
+              }
             />
             <div className="space-y-3 p-4">
-              <TextInput
-                value={recordSearch}
-                onChange={(event) => setRecordSearch(event.target.value)}
-                placeholder="Search beds, varieties, notes or scouting type"
-              />
+              <div className="flex flex-wrap items-center gap-3">
+                <TextInput
+                  value={recordSearch}
+                  onChange={(event) => setRecordSearch(event.target.value)}
+                  placeholder="Search greenhouse, bed, pest/disease, variety, scout, stage or notes"
+                  className="max-w-md"
+                />
+                <span className="text-xs text-ink-faint">
+                  {filteredScoutingRecords.length} record
+                  {filteredScoutingRecords.length === 1 ? "" : "s"}
+                </span>
+              </div>
               <div className="overflow-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
                       <th className="px-3 py-2.5 font-semibold">Date</th>
-                      <th className="px-3 py-2.5 font-semibold">Type</th>
+                      <th className="px-3 py-2.5 font-semibold">Greenhouse</th>
                       <th className="px-3 py-2.5 font-semibold">Bed</th>
+                      <th className="px-3 py-2.5 font-semibold">Type</th>
+                      <th className="px-3 py-2.5 font-semibold">Pest / Disease</th>
                       <th className="px-3 py-2.5 font-semibold">Variety</th>
-                      <th className="px-3 py-2.5 font-semibold">Severity</th>
+                      <th className="px-3 py-2.5 font-semibold">Stage</th>
+                      <th className="px-3 py-2.5 font-semibold">On plant</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Severity</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Count</th>
+                      <th className="px-3 py-2.5 font-semibold">Scout</th>
                       <th className="px-3 py-2.5 font-semibold">Notes</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
                     {scouting.isLoading ? (
                       <tr>
-                        <td colSpan={6} className="px-3 py-6">
+                        <td colSpan={12} className="px-3 py-6">
                           <Spinner label="Loading records…" />
                         </td>
                       </tr>
                     ) : filteredScoutingRecords.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-3 py-6 text-center text-ink-faint">
+                        <td colSpan={12} className="px-3 py-6 text-center text-ink-faint">
                           No matching records.
                         </td>
                       </tr>
                     ) : (
                       scoutingTable.paged.map((row) => (
-                        <tr key={row.id} className="hover:bg-surface">
-                          <td className="px-3 py-2.5 whitespace-nowrap text-ink-soft">
-                            {new Date(row.recorded_at).toLocaleString("en-GB", {
+                        <tr key={row.r.id} className="align-top hover:bg-surface">
+                          <td className="whitespace-nowrap px-3 py-2.5 text-ink-soft">
+                            {new Date(row.r.recorded_at).toLocaleString("en-GB", {
                               dateStyle: "medium",
                               timeStyle: "short",
                             })}
                           </td>
-                          <td className="px-3 py-2.5 capitalize text-ink-soft">{row.scouting_for}</td>
-                          <td className="px-3 py-2.5 text-ink-soft">{row.bed_code ?? "—"}</td>
-                          <td className="px-3 py-2.5 text-ink-soft">{row.variety_code ?? "—"}</td>
-                          <td className="px-3 py-2.5 tabular-nums text-ink">{row.severity}</td>
-                          <td className="px-3 py-2.5 text-ink-soft">{row.notes ?? "—"}</td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-ink-soft">
+                            {row.greenhouse}
+                          </td>
+                          <td className="px-3 py-2.5 text-ink-soft">{row.r.bed_code ?? "—"}</td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-ink-soft">
+                            {SCOUTING_LABEL[row.r.scouting_for]}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className="font-medium text-ink">{row.target}</span>
+                            {row.targetKind !== "—" && (
+                              <span className="ml-1.5 text-xs text-ink-faint">
+                                {row.targetKind}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-ink-soft">{row.variety}</td>
+                          <td className="px-3 py-2.5 text-ink-soft">{row.r.stage ?? "—"}</td>
+                          <td className="px-3 py-2.5 text-ink-soft">
+                            {row.r.location_on_plant ?? "—"}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <span
+                              className="inline-block min-w-[2.25rem] rounded-md px-1.5 py-0.5 text-xs font-bold tabular-nums"
+                              style={{
+                                backgroundColor: `${severityHex(row.r.severity)}22`,
+                                color: row.r.severity >= 3 ? "#b91c1c" : "#047857",
+                              }}
+                            >
+                              {row.r.severity}/5
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
+                            {row.count || "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-ink-soft">
+                            {row.scout}
+                            {row.r.flagged && (
+                              <span
+                                className="ml-1.5 text-xs font-semibold text-red-600"
+                                title={row.r.flag_reason ?? "Flagged"}
+                              >
+                                ⚑
+                              </span>
+                            )}
+                          </td>
+                          <td className="max-w-[16rem] px-3 py-2.5 text-ink-soft">
+                            {row.r.notes ?? "—"}
+                            {row.r.session_comment && (
+                              <span
+                                className="mt-0.5 block truncate text-xs italic text-ink-faint"
+                                title={row.r.session_comment}
+                              >
+                                Session: {row.r.session_comment}
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       ))
                     )}

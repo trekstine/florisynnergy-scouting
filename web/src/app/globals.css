@@ -37,3 +37,104 @@
 .leaflet-tooltip.gh-label::before {
   display: none;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Login canvas — a "living greenhouse" backdrop. Pure CSS so it costs no
+   JS and never blocks the form. All of it collapses under
+   prefers-reduced-motion at the bottom of this block.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Beds breathe: pressure tiles fade in and out of intensity, staggered by
+   an inline animation-delay so the grid ripples rather than blinks. */
+@keyframes bed-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+}
+.bed-tile {
+  animation: bed-breathe 5.5s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* Geofence radar sweeping the block grid. */
+@keyframes radar-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.radar-sweep {
+  animation: radar-sweep 9s linear infinite;
+  transform-origin: center;
+}
+
+/* Pollen drifting upward across the panel. */
+@keyframes pollen-rise {
+  0% {
+    transform: translate3d(0, 110%, 0) scale(0.6);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.55;
+  }
+  85% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translate3d(28px, -12%, 0) scale(1.1);
+    opacity: 0;
+  }
+}
+.pollen {
+  animation: pollen-rise linear infinite;
+  will-change: transform, opacity;
+}
+
+/* Bloom mark draws itself in on load. */
+@keyframes petal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.5) rotate(-18deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+.petal-in {
+  animation: petal-in 900ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transform-origin: center;
+}
+
+/* Form column entrance. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise-in {
+  animation: rise-in 620ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bed-tile,
+  .radar-sweep,
+  .pollen,
+  .petal-in,
+  .rise-in {
+    animation: none !important;
+  }
+  .pollen {
+    opacity: 0.3;
+  }
+}
