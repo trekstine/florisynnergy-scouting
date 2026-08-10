@@ -239,11 +239,11 @@ class _HomeScreenState extends State<HomeScreen> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Padding(
-                padding: const EdgeInsets.all(6),
+                padding: const EdgeInsets.all(5),
                 child: Image.asset('assets/logo.png', fit: BoxFit.contain),
               ),
             ),

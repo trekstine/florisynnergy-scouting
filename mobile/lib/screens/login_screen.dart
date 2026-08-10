@@ -28,19 +28,17 @@ class ScoutLoginScreen extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: kPrimary.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(kRadiusLg),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+                  // The registered trademark, used as supplied — the login
+                  // screen is where the brand should read as itself.
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Image.asset(
+                      'assets/logo-lockup.png',
+                      height: 74,
+                      fit: BoxFit.contain,
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 24),
                   Text('Welcome back', style: kDisplay()),
                   const SizedBox(height: 8),
                   Text(

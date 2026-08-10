@@ -189,7 +189,7 @@ export default function SettingsPage() {
             <div className="flex items-center gap-4 px-4 py-4">
               <LogoMark size={36} />
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-ink">FloriSynergy IPM</p>
+                <p className="text-sm font-semibold text-ink">Florisynergy IPM</p>
                 <p className="text-xs text-ink-faint">
                   Version 1.0 · Geofenced scouting, spraying and agronomy. Scouts capture
                   in the mobile app; everything syncs here.

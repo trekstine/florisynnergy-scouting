@@ -145,7 +145,7 @@ export function Sidebar() {
         )}
 
         <p className="mt-2 px-3 text-[10px] font-medium text-white/25">
-          FloriSynergy IPM · v1.0
+          Florisynergy IPM · v1.0
         </p>
       </div>
     </nav>

@@ -144,7 +144,7 @@ export default function TvPage() {
       {/* ── Header ── */}
       <header className="flex shrink-0 items-center justify-between border-b border-white/10 px-10 py-5">
         <div className="flex items-center gap-4">
-          <LogoMark size={46} />
+          <LogoMark size={46} tone="light" />
           <div>
             <p className="text-2xl font-bold leading-tight">
               Flori<span className="text-brand-400">Synergy</span>{" "}

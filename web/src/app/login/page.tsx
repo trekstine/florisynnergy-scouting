@@ -4,7 +4,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
-import { Logo, LogoMark } from "@/components/Logo";
+import { LogoLockup, LogoMark } from "@/components/Logo";
 import { ErrorBox } from "@/components/ui";
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -238,7 +238,8 @@ function LoginForm() {
         <div className="rise-in grid w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl lg:grid-cols-2">
           {/* Form side */}
           <div className="flex flex-col justify-center px-8 py-12 sm:px-12">
-            <Logo size={38} />
+            {/* The brand introduces itself in full here. */}
+            <LogoLockup width={168} />
 
             <div className="mt-10">
               <p className="text-sm font-medium text-ink-faint">{greeting}</p>

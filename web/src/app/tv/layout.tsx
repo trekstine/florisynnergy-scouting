@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "FloriSynergy IPM — Farm Wallboard",
+  title: "Florisynergy IPM — Farm Wallboard",
 };
 
 /**

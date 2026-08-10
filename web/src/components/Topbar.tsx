@@ -27,7 +27,7 @@ export function Topbar({ user }: { user: SessionUser | null }) {
   const pathname = usePathname();
 
   const base = "/" + (pathname.split("/")[1] ?? "");
-  const title = PAGE_TITLES[base] ?? "FloriSynergy";
+  const title = PAGE_TITLES[base] ?? "Florisynergy";
   const inSettings = SETTINGS_CHILDREN.has(base);
 
   const today = new Date().toLocaleDateString("en-GB", {
