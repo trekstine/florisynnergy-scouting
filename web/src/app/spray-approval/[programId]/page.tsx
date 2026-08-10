@@ -9,7 +9,6 @@ import { Spinner } from "@/components/ui";
 import { formatDate, isHazardous, money } from "@/lib/format";
 import { useEmployees, useGreenhouses, useSpray, useVarieties } from "@/lib/hooks";
 import { programKey } from "@/lib/sprayExport";
-import type { SprayRecord } from "@/lib/types";
 
 /**
  * A signable one-page spray authorisation.

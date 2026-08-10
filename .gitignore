@@ -1,0 +1,10 @@
+# Real secrets. Only `.env.prod.example` (with placeholders) belongs in git —
+# `.env` holds the database password, the JWT signing key and the legacy API
+# key, none of which should ever reach a remote.
+.env
+.env.*
+!.env.prod.example
+
+# Local tooling
+.claude/settings.local.json
+.DS_Store
