@@ -44,8 +44,15 @@ const GROUPS: {
   },
 ];
 
+/** The configuration pages nested under the Settings hub. */
+export const SETTINGS_CHILDREN = [
+  { href: "/mapping", label: "Farm Mapping" },
+  { href: "/workforce", label: "Workforce" },
+  { href: "/reference", label: "Reference Data" },
+];
+
 /** Routes that belong to the Settings area (hub + its three sub-pages). */
-export const SETTINGS_ROUTES = ["/settings", "/mapping", "/workforce", "/reference"];
+export const SETTINGS_ROUTES = ["/settings", ...SETTINGS_CHILDREN.map((c) => c.href)];
 
 function NavItem({
   href,
@@ -114,8 +121,31 @@ export function Sidebar() {
           icon={Settings}
           active={settingsActive}
         />
+
+        {/* Configuration pages are only reachable through here, so once you're
+            inside the area they expand — otherwise moving from Workforce to
+            Reference Data means bouncing off the hub every time. */}
+        {settingsActive && (
+          <ul className="ml-[26px] mt-0.5 space-y-0.5 border-l border-white/10 pl-2">
+            {SETTINGS_CHILDREN.map((c) => (
+              <li key={c.href}>
+                <Link
+                  href={c.href}
+                  className={`block rounded-md px-3 py-1.5 text-[13px] transition-colors ${
+                    isActive(c.href)
+                      ? "font-semibold text-white"
+                      : "text-white/50 hover:text-white"
+                  }`}
+                >
+                  {c.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <p className="mt-2 px-3 text-[10px] font-medium text-white/25">
-          FloriSynergy Scouting · v1.0
+          FloriSynergy IPM · v1.0
         </p>
       </div>
     </nav>

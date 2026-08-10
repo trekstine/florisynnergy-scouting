@@ -1,6 +1,7 @@
 """Reference data — varieties, pests, diseases, chemicals."""
 from __future__ import annotations
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..deps import get_current_employee, require_roles
 from ..models import Chemical, Disease, Employee, Pest, Variety
+from ..services import chemical_import
 from ..services.etl_audit import record as audit_record
 from ..schemas import (
+    ChemicalImportResult,
     ChemicalOut,
     DiseaseCreate,
     DiseaseOut,
@@ -79,10 +82,27 @@ async def update_pest(
     if pest is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pest not found")
     old_threshold = pest.threshold
-    for field in ("name", "category", "threshold", "is_active"):
+    old_pressure = pest.pressure_threshold
+    for field in ("name", "category", "threshold", "pressure_threshold", "is_active"):
         val = getattr(payload, field)
         if val is not None:
             setattr(pest, field, val)
+    if (
+        payload.pressure_threshold is not None
+        and payload.pressure_threshold != old_pressure
+    ):
+        await audit_record(
+            db,
+            employee_id=current.id,
+            entity="pest",
+            entity_id=pest.id,
+            action="threshold_change",
+            field="pressure_threshold",
+            old=old_pressure,
+            new=payload.pressure_threshold,
+            reason=payload.reason,
+            summary=f"{pest.name} pressure ETL {old_pressure} → {payload.pressure_threshold}",
+        )
     if payload.threshold is not None and payload.threshold != old_threshold:
         await audit_record(
             db,
@@ -134,10 +154,27 @@ async def update_disease(
     if disease is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Disease not found")
     old_threshold = disease.threshold
-    for field in ("name", "threshold", "is_active"):
+    old_pressure = disease.pressure_threshold
+    for field in ("name", "threshold", "pressure_threshold", "is_active"):
         val = getattr(payload, field)
         if val is not None:
             setattr(disease, field, val)
+    if (
+        payload.pressure_threshold is not None
+        and payload.pressure_threshold != old_pressure
+    ):
+        await audit_record(
+            db,
+            employee_id=current.id,
+            entity="disease",
+            entity_id=disease.id,
+            action="threshold_change",
+            field="pressure_threshold",
+            old=old_pressure,
+            new=payload.pressure_threshold,
+            reason=payload.reason,
+            summary=f"{disease.name} pressure ETL {old_pressure} → {payload.pressure_threshold}",
+        )
     if payload.threshold is not None and payload.threshold != old_threshold:
         await audit_record(
             db,
@@ -159,3 +196,33 @@ async def update_disease(
 @router.get("/chemicals", response_model=list[ChemicalOut])
 async def list_chemicals(db: AsyncSession = Depends(get_db), _=Depends(get_current_employee)):
     return (await db.execute(select(Chemical).order_by(Chemical.name))).scalars().all()
+
+
+@router.post("/chemicals/import", response_model=ChemicalImportResult)
+async def import_chemicals_from_legacy(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_roles("admin")),
+):
+    """Pull the master chemical list (with real buying prices) from the legacy
+    FloriSynergy API. Idempotent — matches on name, so re-running updates in
+    place and never overwrites locally-entered agronomy data with blanks."""
+    try:
+        result = await chemical_import.import_chemicals(db)
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Chemical endpoint unreachable: {exc}"
+        )
+    except ValueError as exc:  # JSON decode
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Chemical endpoint returned bad JSON: {exc}"
+        )
+    return ChemicalImportResult(
+        fetched=result.fetched,
+        created=result.created,
+        updated=result.updated,
+        skipped=result.skipped,
+        needs_agronomy=sorted(set(result.needs_agronomy)),
+        errors=result.errors,
+    )

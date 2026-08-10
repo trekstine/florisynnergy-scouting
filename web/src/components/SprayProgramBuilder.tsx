@@ -3,17 +3,21 @@
 import {
   AlertTriangle,
   Beaker,
+  Droplets,
   Info,
   Loader2,
+  MapPin,
+  Notebook,
   Plus,
+  Settings2,
   ShieldAlert,
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge, Button, ErrorBox, Field, Select, TextInput } from "@/components/ui";
-import { money } from "@/lib/format";
+import { isHazardous, money } from "@/lib/format";
 import {
   useChemicals,
   useCreateSprayProgram,
@@ -22,16 +26,37 @@ import {
 } from "@/lib/hooks";
 import type { ComplianceIssue, SprayPreview } from "@/lib/types";
 
-const COVERAGES = ["Full block", "Spot treatment", "Perimeter", "Alternate rows"];
+const COVERAGES = ["Full Cover", "Top Cover"];
+const APPLICATION_TYPES = [
+  "Foliar",
+  "Drench",
+  "Fogging",
+  "Dusting",
+  "Drip",
+];
+
+/** Product for a given tank: rate is per 100 L of water. */
+function doseFromWater(volume: number, rate: number): number | null {
+  if (!volume || !rate || volume <= 0 || rate <= 0) return null;
+  return Math.round((volume * rate) / 100_000 * 1000) / 1000;
+}
+
+interface Item {
+  preview: SprayPreview;
+  rate: number;
+  qty: number | null;
+  cost: number | null;
+}
 
 /**
- * Explicit, reviewable spray program builder.
+ * Spray program builder, following the FloriSynergy spray sheet: block and
+ * tank details are shared across the mix, then products are added one at a
+ * time with their own rate per 100 L, quantity auto-calculating.
  *
- * The ETL engine still does the thinking — it detects the breach, raises the
- * recommendation and suggests the chemical, which arrives here as a pre-filled
- * first product. But nothing is written until a person has seen the dosing,
- * cost, PHI and compliance verdict and pressed the button. Automation informs;
- * the human decides.
+ * The ETL engine still does the thinking — it raises the recommendation and
+ * suggests the chemical, which arrives here as a pre-filled first product —
+ * but nothing is written until a person has reviewed the dose, cost, PHI and
+ * compliance verdict.
  */
 export function SprayProgramBuilder({
   open,
@@ -59,84 +84,169 @@ export function SprayProgramBuilder({
   const preview = useSprayPreview();
   const createProgram = useCreateSprayProgram();
 
-  // Ad-hoc programs (started from the Spray page rather than a
-  // recommendation) arrive with no block, so the user picks one here.
-  const [greenhouseId, setGreenhouseId] = useState<number | null>(
-    context.greenhouseId,
-  );
+  const today = new Date().toISOString().slice(0, 10);
+
+  // ── Location ──
+  const [greenhouseId, setGreenhouseId] = useState<number | null>(context.greenhouseId);
   const [bedCode, setBedCode] = useState(context.bedCode ?? "");
+  const [partition, setPartition] = useState("");
   const [varietyCode, setVarietyCode] = useState(context.varietyCode ?? "");
+  const [scoutReportDate, setScoutReportDate] = useState(today);
+
+  // ── Application ──
+  const [applicationType, setApplicationType] = useState(APPLICATION_TYPES[0]!);
   const [coverage, setCoverage] = useState(COVERAGES[0]!);
-  const [startDate, setStartDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
-  const [comments, setComments] = useState("");
-  const [items, setItems] = useState<SprayPreview[]>([]);
+  const [rei, setRei] = useState("");
+  const [volume, setVolume] = useState("1000");
+  const [startDate, setStartDate] = useState(today);
+  const [startTime, setStartTime] = useState("07:00");
+
+  // ── Products ──
+  const [items, setItems] = useState<Item[]>([]);
   const [picker, setPicker] = useState("");
+  const [rateInput, setRateInput] = useState("");
+
+  const [comments, setComments] = useState("");
   const [override, setOverride] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset whenever the modal is opened for a different recommendation.
+  const volumeNum = Number(volume) || 0;
+  const rateNum = Number(rateInput) || 0;
+  const pendingQty = doseFromWater(volumeNum, rateNum);
+
+  /**
+   * Re-price the mix whenever the tank size changes.
+   *
+   * Each item's qty and cost were computed by the server for the volume in
+   * force when it was added. Edit the volume afterwards and those figures go
+   * stale — but the server recomputes from the *submitted* volume, so the
+   * manager would be approving one number and getting another. This mirrors
+   * the server's arithmetic exactly: qty = volume × rate ÷ 100,000, then
+   * cost = qty × buying price.
+   */
+  useEffect(() => {
+    setItems((prev) =>
+      prev.map((it) => {
+        const qty = doseFromWater(volumeNum, it.rate);
+        const price = it.preview.buying_price;
+        return {
+          ...it,
+          qty,
+          cost: qty != null && price != null ? Math.round(qty * price * 100) / 100 : null,
+        };
+      }),
+    );
+  }, [volumeNum]);
+
   useEffect(() => {
     if (!open) return;
     setGreenhouseId(context.greenhouseId);
     setBedCode(context.bedCode ?? "");
+    setPartition("");
     setVarietyCode(context.varietyCode ?? "");
+    setScoutReportDate(today);
+    setApplicationType(APPLICATION_TYPES[0]!);
     setCoverage(COVERAGES[0]!);
-    setStartDate(new Date().toISOString().slice(0, 10));
-    setComments("");
+    setRei("");
+    setVolume("1000");
+    setStartDate(today);
+    setStartTime("07:00");
     setItems([]);
     setPicker("");
+    setRateInput("");
+    setComments("");
     setOverride(false);
     setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, context.recommendationId]);
 
-  const addProduct = useMemo(
-    () =>
-      async (chemicalId: number) => {
-        if (items.some((i) => i.chemical_id === chemicalId)) {
-          setError("That product is already in this program.");
-          return;
-        }
-        setError(null);
-        try {
-          const result = await preview.mutateAsync({
-            chemical_id: chemicalId,
-            greenhouse_id: greenhouseId,
-            bed_code: bedCode || null,
-            variety_code: varietyCode || null,
-            coverage,
-            start_date: startDate,
-            pest_id: context.pestId ?? null,
-            disease_id: context.diseaseId ?? null,
-          });
-          setItems((prev) => [...prev, result]);
-        } catch (e) {
-          setError(e instanceof Error ? e.message : "Could not price that product.");
-        }
-      },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, context, bedCode, varietyCode, coverage, startDate],
-  );
-
-  // Pre-fill the recommendation's suggested chemical as the first product.
+  // Pre-fill the recommendation's suggested chemical.
   useEffect(() => {
     if (!open || !context.suggestedChemicalId || items.length > 0) return;
-    void addProduct(context.suggestedChemicalId);
+    setPicker(String(context.suggestedChemicalId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, context.suggestedChemicalId]);
 
   if (!open) return null;
 
-  const totalCost = items.reduce((s, i) => s + (i.cost_of_chemical ?? 0), 0);
+  async function addProduct() {
+    const chemicalId = Number(picker);
+    if (!chemicalId) {
+      setError("Select a product.");
+      return;
+    }
+    if (!rateNum) {
+      setError("Enter the rate (product per 100 L of water).");
+      return;
+    }
+    if (items.some((i) => i.preview.chemical_id === chemicalId)) {
+      setError("That product is already in this program.");
+      return;
+    }
+    setError(null);
+    try {
+      const result = await preview.mutateAsync({
+        chemical_id: chemicalId,
+        greenhouse_id: greenhouseId,
+        bed_code: bedCode || null,
+        variety_code: varietyCode || null,
+        coverage,
+        start_date: startDate,
+        pest_id: context.pestId ?? null,
+        disease_id: context.diseaseId ?? null,
+        volume_of_water_l: volumeNum || null,
+        rate: rateNum,
+      });
+      setItems((prev) => [
+        ...prev,
+        {
+          preview: result,
+          rate: rateNum,
+          qty: result.qty,
+          cost: result.cost_of_chemical,
+        },
+      ]);
+      setPicker("");
+      setRateInput("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not price that product.");
+    }
+  }
+
+  const totalCost = items.reduce((s, i) => s + (i.cost ?? 0), 0);
   const harvestDates = items
-    .map((i) => i.safe_harvest_date)
+    .map((i) => i.preview.safe_harvest_date)
     .filter((d): d is string => !!d)
     .sort();
   const latestHarvest = harvestDates[harvestDates.length - 1] ?? null;
 
-  const allIssues: ComplianceIssue[] = items.flatMap((i) => i.issues);
+  /**
+   * Two products in one tank sharing a mode of action defeats rotation. The
+   * server rejects this, but each per-product preview only knows about its
+   * own chemical — so the conflict is derived here to surface it while the
+   * mix is being built rather than at submit time.
+   */
+  const tankMixIssues: ComplianceIssue[] = [];
+  const seenRac = new Map<string, string>();
+  for (const it of items) {
+    const rac = it.preview.rac_code;
+    if (!rac) continue;
+    const other = seenRac.get(rac);
+    if (other) {
+      tankMixIssues.push({
+        level: "block",
+        code: "tank_mix_rac",
+        message: `${it.preview.name} and ${other} share mode of action RAC ${rac} — tank-mixing them adds no resistance benefit.`,
+      });
+    } else {
+      seenRac.set(rac, it.preview.name);
+    }
+  }
+
+  const allIssues: ComplianceIssue[] = [
+    ...tankMixIssues,
+    ...items.flatMap((i) => i.preview.issues),
+  ];
   const blocking = allIssues.filter((i) => i.level === "block");
   const warnings = allIssues.filter((i) => i.level === "warn");
   const infos = allIssues.filter((i) => i.level === "info");
@@ -149,12 +259,18 @@ export function SprayProgramBuilder({
       const result = await createProgram.mutateAsync({
         greenhouse_id: greenhouseId,
         bed_code: bedCode || null,
+        partition_no: partition || null,
         variety_code: varietyCode || null,
+        type_of_application: applicationType,
         coverage,
+        rei: rei || null,
+        volume_of_water_l: volumeNum || null,
         comments: comments || null,
         start_date: startDate,
+        start_time: startTime || null,
+        scout_report_date: scoutReportDate || null,
         recommendation_id: context.recommendationId ?? null,
-        items: items.map((i) => ({ chemical_id: i.chemical_id })),
+        items: items.map((i) => ({ chemical_id: i.preview.chemical_id, rate: i.rate })),
         override,
       });
       onCreated?.(result.program_id);
@@ -167,20 +283,19 @@ export function SprayProgramBuilder({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
       <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        {/* Header */}
         <div className="flex items-start justify-between gap-3 border-b border-line px-6 py-4">
           <div>
-            <h2 className="text-lg font-bold text-ink">Plan spray program</h2>
+            <h2 className="text-lg font-bold text-ink">New spray program</h2>
             <p className="mt-0.5 text-sm text-ink-faint">
-              {context.greenhouseLabel}
-              {context.bedCode && ` · Bed ${context.bedCode}`}
-              {context.targetLabel && (
+              {context.targetLabel ? (
                 <>
-                  {" · targeting "}
+                  Targeting{" "}
                   <span className="font-semibold text-ink-soft">
                     {context.targetLabel}
                   </span>
                 </>
+              ) : (
+                "Block, tank and timing are shared across the mix"
               )}
             </p>
           </div>
@@ -195,36 +310,43 @@ export function SprayProgramBuilder({
         <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
           <ErrorBox message={error} />
 
-          {/* Application context */}
-          {context.greenhouseId == null && (
-            <div className="mt-1">
-              <Field label="Greenhouse">
+          {/* ── Location ── */}
+          <SectionHeader icon={MapPin} label="Location" />
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            <Field label="Greenhouse">
+              {context.greenhouseId == null ? (
                 <Select
                   value={greenhouseId ?? ""}
                   onChange={(e) => {
                     setGreenhouseId(e.target.value ? Number(e.target.value) : null);
-                    // Dosing is area-based, so previously priced products are
-                    // stale the moment the block changes.
                     setItems([]);
                   }}
                 >
-                  <option value="">Select a block…</option>
+                  <option value="">Select…</option>
                   {(greenhouses.data ?? []).map((g) => (
                     <option key={g.id} value={g.id}>
                       {g.name}
                     </option>
                   ))}
                 </Select>
-              </Field>
-            </div>
-          )}
-
-          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+              ) : (
+                <div className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700">
+                  {context.greenhouseLabel}
+                </div>
+              )}
+            </Field>
             <Field label="Bed / bay">
               <TextInput
                 value={bedCode}
                 onChange={(e) => setBedCode(e.target.value)}
                 placeholder="All beds"
+              />
+            </Field>
+            <Field label="Partition">
+              <TextInput
+                value={partition}
+                onChange={(e) => setPartition(e.target.value)}
+                placeholder="Optional"
               />
             </Field>
             <Field label="Variety">
@@ -233,6 +355,30 @@ export function SprayProgramBuilder({
                 onChange={(e) => setVarietyCode(e.target.value)}
                 placeholder="All varieties"
               />
+            </Field>
+            <Field label="Scout report date">
+              <TextInput
+                type="date"
+                value={scoutReportDate}
+                onChange={(e) => setScoutReportDate(e.target.value)}
+              />
+            </Field>
+          </div>
+
+          {/* ── Application ── */}
+          <SectionHeader icon={Settings2} label="Application" />
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Field label="Type">
+              <Select
+                value={applicationType}
+                onChange={(e) => setApplicationType(e.target.value)}
+              >
+                {APPLICATION_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
             </Field>
             <Field label="Coverage">
               <Select value={coverage} onChange={(e) => setCoverage(e.target.value)}>
@@ -243,6 +389,21 @@ export function SprayProgramBuilder({
                 ))}
               </Select>
             </Field>
+            <Field label="Re-entry (hours)">
+              <TextInput
+                value={rei}
+                onChange={(e) => setRei(e.target.value)}
+                placeholder="e.g. 12"
+              />
+            </Field>
+            <Field label="Volume of water (L)">
+              <TextInput
+                type="number"
+                min={1}
+                value={volume}
+                onChange={(e) => setVolume(e.target.value)}
+              />
+            </Field>
             <Field label="Start date">
               <TextInput
                 type="date"
@@ -250,26 +411,79 @@ export function SprayProgramBuilder({
                 onChange={(e) => setStartDate(e.target.value)}
               />
             </Field>
+            <Field label="Start time">
+              <TextInput
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+              />
+            </Field>
           </div>
 
-          {/* Products */}
-          <div className="mt-6 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-ink">
-              Products{" "}
-              <span className="font-normal text-ink-faint">({items.length})</span>
-            </h3>
-            {items.length > 0 && (
-              <p className="text-xs text-ink-faint">
-                Dosing calculated from block area
-                {items[0]?.area_ha != null && ` · ${items[0].area_ha} ha`}
-              </p>
-            )}
+          {/* ── Products ── */}
+          <SectionHeader icon={Beaker} label={`Products (${items.length})`} />
+
+          {/* Add product — rate drives an auto-calculated quantity */}
+          <div className="rounded-xl border border-line bg-surface/60 p-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_7rem_7rem_auto] sm:items-end">
+              <Field label="Product">
+                <Select
+                  value={picker}
+                  onChange={(e) => setPicker(e.target.value)}
+                  disabled={greenhouseId == null}
+                >
+                  <option value="">Select a product…</option>
+                  {(chemicals.data ?? [])
+                    .filter(
+                      (c) => !items.some((i) => i.preview.chemical_id === c.id),
+                    )
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                        {c.target1 ? ` — ${c.target1}` : ""}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+              <Field label="Rate /100L">
+                <TextInput
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={rateInput}
+                  onChange={(e) => setRateInput(e.target.value)}
+                  placeholder="e.g. 50"
+                />
+              </Field>
+              <Field label="Quantity">
+                <div className="rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold tabular-nums text-ink">
+                  {pendingQty ?? "—"}
+                </div>
+              </Field>
+              <Button
+                variant="outline"
+                onClick={addProduct}
+                disabled={preview.isPending || greenhouseId == null}
+              >
+                {preview.isPending ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <Plus size={15} />
+                )}
+                Add
+              </Button>
+            </div>
+            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-faint">
+              <Droplets size={12} />
+              Quantity = volume × rate ÷ 100,000. At {volumeNum || 0} L, a rate of{" "}
+              {rateNum || "—"} gives {pendingQty ?? "—"}.
+            </p>
           </div>
 
-          <div className="mt-2 space-y-2">
+          <div className="mt-3 space-y-2">
             {items.map((item, idx) => (
               <div
-                key={item.chemical_id}
+                key={item.preview.chemical_id}
                 className="rounded-xl border border-line p-3"
               >
                 <div className="flex items-start gap-3">
@@ -278,61 +492,56 @@ export function SprayProgramBuilder({
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-bold text-ink">{item.name}</p>
-                      {item.who_class && (
+                      <p className="text-sm font-bold text-ink">{item.preview.name}</p>
+                      {item.preview.who_class && (
                         <Badge
                           color={
-                            ["IA", "IB", "II"].includes(item.who_class)
+                            isHazardous(item.preview.who_class)
                               ? "#dc2626"
                               : "#64748b"
                           }
                         >
-                          WHO {item.who_class}
+                          WHO {item.preview.who_class}
                         </Badge>
                       )}
-                      {item.rac_code && <Badge>RAC {item.rac_code}</Badge>}
+                      {item.preview.rac_code && (
+                        <Badge>RAC {item.preview.rac_code}</Badge>
+                      )}
                     </div>
-                    {(item.target1 || item.active_ingredient1) && (
+                    {item.preview.target1 && (
                       <p className="mt-0.5 text-xs text-ink-faint">
-                        {item.active_ingredient1}
-                        {item.target1 && ` · targets ${item.target1}`}
-                        {item.target2 && `, ${item.target2}`}
+                        Targets {item.preview.target1}
+                        {item.preview.target2 && `, ${item.preview.target2}`}
                       </p>
                     )}
-
-                    {/* The maths that used to happen invisibly */}
-                    <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-4">
-                      <Calc label="Rate" value={item.rate ?? "—"} />
+                    <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                      <Calc label="Rate" value={`${item.rate}/100L`} />
                       <Calc
                         label="Quantity"
                         value={item.qty != null ? `${item.qty}` : "—"}
+                        strong
                       />
-                      <Calc label="Water" value={item.volume_of_water ?? "—"} />
                       <Calc
                         label="Cost"
-                        value={
-                          item.cost_of_chemical != null
-                            ? money(item.cost_of_chemical)
-                            : "—"
-                        }
+                        value={item.cost != null ? money(item.cost) : "—"}
                         strong
                       />
                       <Calc
                         label="PHI"
-                        value={item.phi_days != null ? `${item.phi_days} days` : "—"}
-                      />
-                      <Calc label="REI" value={item.rei ? `${item.rei}h` : "—"} />
-                      <Calc
-                        label="Safe harvest"
-                        value={item.safe_harvest_date ?? "—"}
-                        span2
+                        value={
+                          item.preview.phi_days != null
+                            ? `${item.preview.phi_days}d → ${item.preview.safe_harvest_date}`
+                            : "—"
+                        }
                       />
                     </div>
                   </div>
                   <button
                     onClick={() =>
                       setItems((prev) =>
-                        prev.filter((p) => p.chemical_id !== item.chemical_id),
+                        prev.filter(
+                          (p) => p.preview.chemical_id !== item.preview.chemical_id,
+                        ),
                       )
                     }
                     title="Remove product"
@@ -345,65 +554,23 @@ export function SprayProgramBuilder({
             ))}
 
             {items.length === 0 && !preview.isPending && (
-              <div className="rounded-xl border border-dashed border-line bg-surface px-4 py-6 text-center text-sm text-ink-faint">
+              <div className="rounded-xl border border-dashed border-line bg-surface px-4 py-5 text-center text-sm text-ink-faint">
                 {greenhouseId == null
-                  ? "Select a greenhouse first — dosing is calculated from block area."
-                  : "No products yet — add one below to see its dosing and cost."}
-              </div>
-            )}
-            {preview.isPending && (
-              <div className="flex items-center gap-2 rounded-xl border border-line px-4 py-3 text-sm text-ink-faint">
-                <Loader2 size={15} className="animate-spin" /> Pricing product…
+                  ? "Select a greenhouse first."
+                  : "No products yet — add one below."}
               </div>
             )}
           </div>
 
-          {/* Add product */}
-          <div className="mt-3 flex gap-2">
-            <Select
-              value={picker}
-              onChange={(e) => setPicker(e.target.value)}
-              className="flex-1"
-              disabled={greenhouseId == null}
-            >
-              <option value="">Add a product…</option>
-              {(chemicals.data ?? [])
-                .filter((c) => !items.some((i) => i.chemical_id === c.id))
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {c.target1 ? ` — ${c.target1}` : ""}
-                  </option>
-                ))}
-            </Select>
-            <Button
-              variant="outline"
-              disabled={!picker || preview.isPending}
-              onClick={() => {
-                void addProduct(Number(picker));
-                setPicker("");
-              }}
-            >
-              <Plus size={15} /> Add
-            </Button>
-          </div>
-
-          {/* Compliance */}
+          {/* ── Compliance ── */}
           {allIssues.length > 0 && (
-            <div className="mt-6">
-              <h3 className="mb-2 text-sm font-bold text-ink">Compliance</h3>
+            <>
+              <SectionHeader icon={ShieldAlert} label="Compliance" />
               <div className="space-y-1.5">
-                {blocking.map((i, n) => (
-                  <IssueRow key={`b${n}`} issue={i} />
-                ))}
-                {warnings.map((i, n) => (
-                  <IssueRow key={`w${n}`} issue={i} />
-                ))}
-                {infos.map((i, n) => (
-                  <IssueRow key={`i${n}`} issue={i} />
+                {[...blocking, ...warnings, ...infos].map((i, n) => (
+                  <IssueRow key={`${i.code}-${n}`} issue={i} />
                 ))}
               </div>
-
               {blocking.length > 0 && (
                 <label className="mt-3 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3">
                   <input
@@ -418,22 +585,18 @@ export function SprayProgramBuilder({
                   </span>
                 </label>
               )}
-            </div>
+            </>
           )}
 
-          {/* Notes */}
-          <div className="mt-6">
-            <Field label="Notes (optional)">
-              <TextInput
-                value={comments}
-                onChange={(e) => setComments(e.target.value)}
-                placeholder="Anything the sprayer should know"
-              />
-            </Field>
-          </div>
+          {/* ── Notes ── */}
+          <SectionHeader icon={Notebook} label="Notes" />
+          <TextInput
+            value={comments}
+            onChange={(e) => setComments(e.target.value)}
+            placeholder="Anything the sprayer should know"
+          />
         </div>
 
-        {/* Footer: the totals a manager signs off on */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-surface px-6 py-4">
           <div className="flex items-center gap-5">
             <div>
@@ -463,7 +626,7 @@ export function SprayProgramBuilder({
               ) : (
                 <>
                   <Beaker size={15} /> Create program
-                  {items.length > 1 && ` (${items.length} products)`}
+                  {items.length > 1 && ` (${items.length})`}
                 </>
               )}
             </Button>
@@ -474,19 +637,34 @@ export function SprayProgramBuilder({
   );
 }
 
+function SectionHeader({
+  icon: Icon,
+  label,
+}: {
+  icon: typeof MapPin;
+  label: string;
+}) {
+  return (
+    <div className="mb-2.5 mt-5 flex items-center gap-1.5 first:mt-0">
+      <Icon size={14} className="text-ink-faint" />
+      <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-ink-faint">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function Calc({
   label,
   value,
   strong,
-  span2,
 }: {
   label: string;
   value: string;
   strong?: boolean;
-  span2?: boolean;
 }) {
   return (
-    <div className={span2 ? "col-span-2" : undefined}>
+    <div>
       <span className="text-ink-faint">{label}: </span>
       <span className={strong ? "font-bold text-ink" : "font-medium text-ink-soft"}>
         {value}

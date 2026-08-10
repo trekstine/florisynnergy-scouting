@@ -97,6 +97,14 @@ class BedCreate(BaseModel):
     centroid_lng: float | None = None
 
 
+class BedBulkCreate(BaseModel):
+    """Generate "Bed 1" … "Bed N" in one call — blocks run to 20+ beds."""
+
+    count: int = Field(ge=1, le=200)
+    start: int = 1
+    prefix: str = Field(default="Bed ", max_length=30)
+
+
 class BedOut(BaseModel):
     id: int
     greenhouse_id: int
@@ -136,6 +144,7 @@ class PestOut(BaseModel):
     name: str
     category: str | None
     threshold: int
+    pressure_threshold: float = 0.5
     is_active: bool
 
 
@@ -143,6 +152,7 @@ class PestUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=150)
     category: str | None = None
     threshold: int | None = Field(default=None, ge=1, le=5)
+    pressure_threshold: float | None = Field(default=None, ge=0.05, le=5)
     is_active: bool | None = None
     reason: str | None = None  # audit note for a threshold change
 
@@ -157,12 +167,14 @@ class DiseaseOut(BaseModel):
     id: int
     name: str
     threshold: int
+    pressure_threshold: float = 0.5
     is_active: bool
 
 
 class DiseaseUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=150)
     threshold: int | None = Field(default=None, ge=1, le=5)
+    pressure_threshold: float | None = Field(default=None, ge=0.05, le=5)
     is_active: bool | None = None
     reason: str | None = None  # audit note for a threshold change
 
@@ -212,12 +224,31 @@ class ChemicalOut(BaseModel):
     id: int
     name: str
     product: str | None
+    type_of_application: str | None = None
+    rate: str | None = None
     who_class: str | None
     rac_code: str | None
     active_ingredient1: str | None
     target1: str | None
+    target2: str | None = None
     rei: str | None
     buying_price: float | None
+    rate_per_ha: float | None = None
+    water_rate_l_per_ha: float | None = None
+    phi_days: int | None = None
+
+
+class ChemicalImportResult(BaseModel):
+    """Outcome of pulling the master list from the legacy FloriSynergy API."""
+
+    fetched: int
+    created: int
+    updated: int
+    skipped: int
+    # Imported without rate/ha or PHI — the spray builder can't price these
+    # until an agronomist fills them in.
+    needs_agronomy: list[str]
+    errors: list[str]
 
 
 # ───────── Scouting capture (offline batch) ─────────
@@ -328,16 +359,34 @@ class SprayOut(BaseModel):
     recommendation_id: int | None
     greenhouse_id: int | None
     bed_code: str | None
+    partition_no: str | None = None
     variety_code: str | None
     product: str | None
+    type_of_application: str | None = None
     rate: str | None
+    volume_of_water: str | None = None
     coverage: str | None
     who_class: str | None
+    rac_code: str | None = None
+    rei: str | None = None
+    # Needed by the approval sheet: an approver signs off on the active
+    # ingredient and target, not just a trade name.
+    active_ingredient1: str | None = None
+    active_ingredient2: str | None = None
+    target1: str | None = None
+    target2: str | None = None
+    chemical_id: int | None = None
+    scout_id: int | None = None
+    area_ha: float | None = None
     qty: float | None
+    buying_price: float | None = None
     cost_of_chemical: float | None
     phi_days: int | None
     safe_harvest_date: date | None
+    comments: str | None = None
     start_date: date | None
+    start_time: time | None = None
+    scout_report_date: date | None = None
     recorded_at: datetime
 
 
@@ -367,9 +416,9 @@ class ComplianceResult(BaseModel):
 class SprayPreviewRequest(BaseModel):
     """Ask the server what a product would cost and constrain, without saving.
 
-    The dosing maths (rate × block hectares), PHI arithmetic and compliance
-    checks all live server-side; this lets the UI show them *before* anyone
-    commits, instead of composing a record invisibly on submit.
+    Dosing, PHI arithmetic and compliance checks all live server-side; this
+    lets the UI show them *before* anyone commits, instead of composing a
+    record invisibly on submit.
     """
 
     chemical_id: int
@@ -380,6 +429,10 @@ class SprayPreviewRequest(BaseModel):
     start_date: date | None = None
     pest_id: int | None = None
     disease_id: int | None = None
+    # Spray-sheet dosing: rate is per 100 L of water. When both are given the
+    # quantity comes from the tank, not from the block's hectares.
+    volume_of_water_l: float | None = Field(default=None, gt=0)
+    rate: float | None = Field(default=None, gt=0)
 
 
 class SprayPreviewOut(BaseModel):
@@ -407,17 +460,29 @@ class SprayPreviewOut(BaseModel):
 
 class SprayProgramItem(BaseModel):
     chemical_id: int
+    # Product per 100 L of water, as written on the spray sheet.
+    rate: float | None = Field(default=None, gt=0)
 
 
 class SprayProgramCreate(BaseModel):
-    """One application event spanning one or more tank-mixed products."""
+    """One application event spanning one or more tank-mixed products.
+
+    Mirrors the FloriSynergy spray sheet: the block, tank and timing are
+    shared across the mix; each product carries its own rate.
+    """
 
     greenhouse_id: int | None = None
     bed_code: str | None = None
+    partition_no: str | None = None
     variety_code: str | None = None
+    type_of_application: str | None = None
     coverage: str | None = None
+    rei: str | None = None
+    volume_of_water_l: float | None = Field(default=None, gt=0)
     comments: str | None = None
     start_date: date | None = None
+    start_time: time | None = None
+    scout_report_date: date | None = None
     recommendation_id: int | None = None
     items: list[SprayProgramItem] = Field(min_length=1)
     override: bool = False
@@ -462,11 +527,50 @@ class BreakdownRow(BaseModel):
     records: int
     avg_severity: float
     over_threshold: int
+    # Beds where this pest/disease/variety was seen — surfaced on hover so a
+    # manager can go straight to the location, not just the count.
+    beds: list[str] = []
+
+
+class AgentTrendPoint(BaseModel):
+    """One day's reading for one pest or disease."""
+
+    date: date
+    agent_kind: Literal["pest", "disease"]
+    agent_name: str
+    records: int
+    avg_severity: float
+    max_severity: int
 
 
 class SeverityBucket(BaseModel):
     severity: int
     count: int
+
+
+class AgentPressure(BaseModel):
+    """Per-greenhouse, per-agent pressure — the Interplant model.
+
+    Pests and diseases are never blended into one greenhouse number: each
+    agent carries its own index (Σ per-bed severity ÷ beds scouted, with
+    unobserved beds counting as 0), its own ETL, and its own hotspot flag.
+    """
+
+    greenhouse_id: int
+    agent_kind: Literal["pest", "disease"]
+    agent_id: int
+    agent_name: str
+    records: int
+    beds_observed: int
+    beds_scouted: int  # the denominator: distinct beds visited in range
+    total_severity: int
+    pressure_index: float
+    max_severity: int
+    hotspot_bed: str | None  # bed carrying the worst observation
+    pressure_threshold: float
+    over_etl: bool  # pressure_index ≥ configured pressure ETL
+    hotspot: bool  # any single observation at/above severity 4
+    action_required: bool  # over_etl OR hotspot
 
 
 class GreenhousePressure(BaseModel):
@@ -479,6 +583,9 @@ class GreenhousePressure(BaseModel):
     avg_severity: float
     over_threshold: int
     pressure: Literal["none", "low", "medium", "high"]
+    # Worst active issue, e.g. "Powdery Mildew severity 4 on Bed 4" — the
+    # band's one-line justification. None when the block is quiet.
+    headline: str | None = None
 
 
 class ObservationPoint(BaseModel):
@@ -499,7 +606,14 @@ class BedPressure(BaseModel):
 
 
 class PestMatrixCell(BaseModel):
-    pest: str
+    """One cell of the pest/disease × greenhouse matrix.
+
+    Diseases sit alongside pests here — they're different agents but the
+    manager reads them on the same grid, so `kind` distinguishes them.
+    """
+
+    pest: str  # agent name (pest or disease)
+    kind: Literal["pest", "disease"] = "pest"
     greenhouse: str
     records: int
     avg_severity: float
@@ -510,7 +624,47 @@ class ScoutSummary(BaseModel):
     name: str
     records: int
     greenhouses_visited: int
+    beds_visited: int = 0
     last_seen: datetime | None
+
+
+class MovementStop(BaseModel):
+    """One uninterrupted spell at a single bed.
+
+    Consecutive records at the same bed collapse into one stop; the scout is
+    considered to have left when their next record lands somewhere else.
+    """
+
+    started_at: datetime
+    ended_at: datetime
+    minutes: float | None
+    greenhouse_id: int | None
+    greenhouse: str
+    bed_code: str | None
+    records: int
+    max_severity: int
+    agents: list[str] = []
+
+
+class MovementDay(BaseModel):
+    date: date
+    records: int
+    beds: int
+    greenhouses: list[str] = []
+    first_seen: datetime
+    last_seen: datetime
+    active_minutes: float
+    stops: list[MovementStop] = []
+
+
+class ScoutMovement(BaseModel):
+    scout_id: int
+    name: str
+    days: list[MovementDay] = []
+    total_records: int = 0
+    total_beds: int = 0
+    active_minutes: float = 0
+    median_minutes_per_bed: float | None = None
 
 
 class SprayCostRow(BaseModel):

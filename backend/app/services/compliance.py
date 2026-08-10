@@ -9,7 +9,7 @@ requires an explicit override.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,13 @@ from ..models import Chemical, Disease, Pest, SprayRecord
 # Re-using the same mode of action on a block within this window is a
 # resistance-management no-no.
 RAC_ROTATION_DAYS = 28
-_HAZARD_CLASSES = {"Ia", "Ib", "I", "II"}
+# Compared case-insensitively — catalogues write these as "Ia", "IA" or "1a"
+# depending on the source, and a hazard warning must not hinge on casing.
+_HAZARD_CLASSES = {"ia", "ib", "i", "ii", "1a", "1b"}
+
+
+def is_hazardous(who_class: str | None) -> bool:
+    return who_class is not None and who_class.strip().lower() in _HAZARD_CLASSES
 
 
 @dataclass
@@ -62,31 +68,38 @@ async def check_spray(
         )
 
     # Resistance rotation — block re-use of the same RAC group on this block.
+    #
+    # Look for *any* application of this mode of action inside the rotation
+    # window, not merely the most recent record. A program writes one row per
+    # tank-mixed product, so "the latest row" is an arbitrary member of the
+    # last mix; checking only that row silently misses a matching MoA sprayed
+    # alongside it, or in the program before.
     if greenhouse_id is not None and chem.rac_code:
+        since = datetime.now(timezone.utc) - timedelta(days=RAC_ROTATION_DAYS)
         last = (
             await db.execute(
                 select(SprayRecord)
                 .where(
                     SprayRecord.greenhouse_id == greenhouse_id,
-                    SprayRecord.rac_code.isnot(None),
+                    SprayRecord.rac_code == chem.rac_code,
+                    SprayRecord.recorded_at >= since,
                 )
                 .order_by(SprayRecord.recorded_at.desc())
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if last is not None and last.rac_code == chem.rac_code:
+        if last is not None:
             days = (datetime.now(timezone.utc) - last.recorded_at).days
-            if days <= RAC_ROTATION_DAYS:
-                issues.append(
-                    Issue(
-                        "block",
-                        "rac_rotation",
-                        f"Same mode of action (RAC {chem.rac_code}) sprayed on this block "
-                        f"{days}d ago — rotate the MoA group to manage resistance.",
-                    )
+            issues.append(
+                Issue(
+                    "block",
+                    "rac_rotation",
+                    f"Same mode of action (RAC {chem.rac_code}) sprayed on this block "
+                    f"{days}d ago — rotate the MoA group to manage resistance.",
                 )
+            )
 
-    if chem.who_class in _HAZARD_CLASSES:
+    if is_hazardous(chem.who_class):
         issues.append(
             Issue("warn", "who_hazard", f"WHO class {chem.who_class} — highly hazardous; confirm PPE and authorization.")
         )

@@ -168,6 +168,9 @@ class Pest(Base):
     category: Mapped[str | None] = mapped_column(String(80))
     # Economic threshold (ETL): severity at/above which an intervention is advised.
     threshold: Mapped[int] = mapped_column(Integer, default=3)
+    # Pressure-index ETL: Σ(per-bed severity) ÷ beds scouted, per greenhouse.
+    # A block-wide measure — distinct from `threshold`, which is per observation.
+    pressure_threshold: Mapped[float] = mapped_column(Float, default=0.5)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
@@ -177,6 +180,7 @@ class Disease(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
     threshold: Mapped[int] = mapped_column(Integer, default=3)
+    pressure_threshold: Mapped[float] = mapped_column(Float, default=0.5)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
@@ -300,6 +304,8 @@ class SprayRecord(Base):
         ForeignKey("greenhouses.id", ondelete="SET NULL")
     )
     bed_code: Mapped[str | None] = mapped_column(String(50))
+    # Sub-division of a bed, as used on the FloriSynergy spray sheet.
+    partition_no: Mapped[str | None] = mapped_column(String(50))
     variety_code: Mapped[str | None] = mapped_column(String(50))
     scout_id: Mapped[int | None] = mapped_column(
         ForeignKey("employees.id", ondelete="SET NULL")

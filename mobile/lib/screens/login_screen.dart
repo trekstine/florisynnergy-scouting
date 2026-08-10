@@ -35,10 +35,9 @@ class ScoutLoginScreen extends ConsumerWidget {
                       color: kPrimary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(kRadiusLg),
                     ),
-                    child: const Icon(
-                      Icons.local_florist_outlined,
-                      size: 28,
-                      color: kPrimary,
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Image.asset('assets/logo.png', fit: BoxFit.contain),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -138,7 +137,7 @@ class ScoutLoginScreen extends ConsumerWidget {
                   const SizedBox(height: 20),
                   Center(
                     child: Text(
-                      '© 2026 FloriSynergy Scouting',
+                      '© 2026 FloriSynergy IPM',
                       style: kCaption(),
                     ),
                   ),

@@ -152,6 +152,8 @@ async def preview_spray_product(
         variety_code=payload.variety_code,
         coverage=payload.coverage,
         start_date=payload.start_date,
+        volume_of_water_l=payload.volume_of_water_l,
+        rate=payload.rate,
     )
     issues = await check_spray(
         db,
@@ -214,6 +216,24 @@ async def create_spray_program(
         )
         all_blocking += [i.message for i in issues if i.level == "block"]
 
+    # Tank-mix resistance check. check_spray() screens each product against
+    # what was sprayed *before*, so it cannot see two products in this very
+    # mix sharing a mode of action — which defeats rotation just as surely.
+    if len(payload.items) > 1:
+        seen_rac: dict[str, str] = {}
+        for item in payload.items:
+            chem = await db.get(Chemical, item.chemical_id)
+            if chem is None or not chem.rac_code:
+                continue
+            other = seen_rac.get(chem.rac_code)
+            if other:
+                all_blocking.append(
+                    f"{chem.name} and {other} share mode of action RAC {chem.rac_code} "
+                    "— tank-mixing them adds no resistance benefit."
+                )
+            else:
+                seen_rac[chem.rac_code] = chem.name
+
     if all_blocking and not payload.override:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -236,10 +256,17 @@ async def create_spray_program(
             chemical_id=item.chemical_id,
             recorded_at=now,
             bed_code=payload.bed_code,
+            partition_no=payload.partition_no,
             variety_code=payload.variety_code,
+            type_of_application=payload.type_of_application,
             coverage=payload.coverage,
+            rei=payload.rei,
+            volume_of_water_l=payload.volume_of_water_l,
+            rate=item.rate,
             comments=comments,
             start_date=payload.start_date,
+            start_time=payload.start_time,
+            scout_report_date=payload.scout_report_date,
             recommendation_id=payload.recommendation_id,
             client_record_id=str(uuid.uuid4()),
             program_id=program_id,

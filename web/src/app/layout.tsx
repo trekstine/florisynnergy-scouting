@@ -7,7 +7,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "FloriSynergy Scouting",
+  title: "FloriSynergy IPM",
   description: "Geofenced scouting, spraying & agronomy for flower farms.",
 };
 

@@ -16,7 +16,7 @@ class ScoutApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'FloriSynergy Scout',
+      title: 'FloriSynergy IPM',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: const _LaunchGate(),

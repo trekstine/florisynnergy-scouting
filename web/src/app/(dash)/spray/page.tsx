@@ -5,11 +5,13 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  FileCheck2,
   Layers,
   Plus,
   ShieldAlert,
   Sprout,
 } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { PaginationBar, usePagination } from "@/components/Pagination";
@@ -24,8 +26,9 @@ import {
   Select,
   Spinner,
 } from "@/components/ui";
-import { formatDate, money } from "@/lib/format";
-import { useGreenhouses, useSpray } from "@/lib/hooks";
+import { formatDate, isHazardous, money } from "@/lib/format";
+import { useEmployees, useGreenhouses, useSpray, useVarieties } from "@/lib/hooks";
+import { buildSprayCsv, downloadCsv, programKey } from "@/lib/sprayExport";
 import type { SprayRecord } from "@/lib/types";
 
 /** A program is one application event — one block, one date, N tank-mixed products. */
@@ -48,6 +51,9 @@ interface Program {
 export default function SprayPage() {
   const spray = useSpray(1000);
   const greenhouses = useGreenhouses();
+  // Only needed so the export resolves codes to names, same as Analytics.
+  const varieties = useVarieties();
+  const employees = useEmployees();
 
   const [ghFilter, setGhFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -59,6 +65,27 @@ export default function SprayPage() {
     return m;
   }, [greenhouses.data]);
 
+  /** Full names for the export — the UI shows codes, but a CSV that says
+   *  "GH03" in one screen and "Greenhouse 03" in another is the drift the
+   *  shared exporter exists to prevent. */
+  const ghFullName = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const g of greenhouses.data ?? []) m.set(g.id, g.name);
+    return m;
+  }, [greenhouses.data]);
+
+  const varietyName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const v of varieties.data ?? []) m.set(v.code, v.name);
+    return m;
+  }, [varieties.data]);
+
+  const employeeName = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const e of employees.data ?? []) m.set(e.id, e.name);
+    return m;
+  }, [employees.data]);
+
   /** Group the flat product rows the API returns back into programs. */
   const programs: Program[] = useMemo(() => {
     const rows = (spray.data ?? []).filter((r) =>
@@ -68,8 +95,10 @@ export default function SprayPage() {
 
     for (const r of rows) {
       // Rows without a program_id are standalone applications (older data or
-      // mobile captures) — give each its own single-product program.
-      const key = r.program_id ?? `single-${r.id}`;
+      // mobile captures) — give each its own single-product program. The
+      // "#<id>" form must match Analytics and the approval sheet, which look
+      // the program up by this same key.
+      const key = programKey(r);
       const existing = map.get(key);
       const date = r.start_date ?? r.recorded_at;
 
@@ -88,7 +117,7 @@ export default function SprayPage() {
           totalCost: r.cost_of_chemical ?? 0,
           safeHarvest: r.safe_harvest_date,
           fromRecommendation: r.recommendation_id != null,
-          hazardous: ["IA", "IB", "II"].includes(r.who_class ?? ""),
+          hazardous: isHazardous(r.who_class),
         });
       } else {
         existing.products.push(r);
@@ -100,7 +129,7 @@ export default function SprayPage() {
           existing.safeHarvest = r.safe_harvest_date;
         }
         if (r.recommendation_id != null) existing.fromRecommendation = true;
-        if (["IA", "IB", "II"].includes(r.who_class ?? "")) existing.hazardous = true;
+        if (isHazardous(r.who_class)) existing.hazardous = true;
       }
     }
 
@@ -149,52 +178,15 @@ export default function SprayPage() {
   }
 
   function exportCsv() {
-    const head = [
-      "program_id",
-      "date",
-      "greenhouse",
-      "bed",
-      "variety",
-      "coverage",
-      "product",
-      "who_class",
-      "rate",
-      "qty",
-      "cost",
-      "phi_days",
-      "safe_harvest_date",
-    ];
-    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const lines = programs.flatMap((p) =>
-      p.products.map((r) =>
-        [
-          p.id,
-          p.date,
-          p.greenhouse,
-          p.bedCode ?? "",
-          p.varietyCode ?? "",
-          p.coverage ?? "",
-          r.product ?? "",
-          r.who_class ?? "",
-          r.rate ?? "",
-          r.qty ?? "",
-          r.cost_of_chemical ?? "",
-          r.phi_days ?? "",
-          r.safe_harvest_date ?? "",
-        ]
-          .map(esc)
-          .join(","),
-      ),
+    const csv = buildSprayCsv(
+      programs.map((p) => ({ id: p.id, records: p.products })),
+      {
+        greenhouse: (id) => ghFullName.get(id) ?? `#${id}`,
+        variety: (code) => varietyName.get(code) ?? code,
+        employee: (id) => employeeName.get(id) ?? "",
+      },
     );
-    const blob = new Blob([[head.join(","), ...lines].join("\n")], {
-      type: "text/csv",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "spray_programs.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(csv, `spray_programs_${new Date().toISOString().slice(0, 10)}.csv`);
   }
 
   return (
@@ -305,44 +297,101 @@ export default function SprayPage() {
                 const isOpen = expanded.has(p.id);
                 return (
                   <li key={p.id}>
-                    <button
-                      onClick={() => toggle(p.id)}
-                      className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-surface"
-                    >
-                      {isOpen ? (
-                        <ChevronDown size={16} className="shrink-0 text-ink-faint" />
-                      ) : (
-                        <ChevronRight size={16} className="shrink-0 text-ink-faint" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-semibold text-ink">
-                            {p.greenhouse}
-                            {p.bedCode && ` · ${p.bedCode}`}
-                          </span>
-                          <Badge>
-                            {p.products.length} product
-                            {p.products.length === 1 ? "" : "s"}
-                          </Badge>
-                          {p.fromRecommendation && (
-                            <Badge color="#059669">From recommendation</Badge>
-                          )}
-                          {p.hazardous && <Badge color="#dc2626">Hazardous</Badge>}
+                    {/* The link is positioned against this header row only —
+                        anchoring it to the <li> would drift once the detail
+                        panel expands. It sits outside the toggle button
+                        because a link nested in a button is invalid HTML. */}
+                    <div className="relative">
+                      <Link
+                        href={`/spray-approval/${encodeURIComponent(p.id)}`}
+                        target="_blank"
+                        title="Open the printable approval sheet"
+                        className="absolute right-5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-brand-700 transition-colors hover:bg-brand-50"
+                      >
+                        <FileCheck2 size={14} /> Approval sheet
+                      </Link>
+                      <button
+                        onClick={() => toggle(p.id)}
+                        className="flex w-full items-center gap-3 py-3 pl-5 pr-44 text-left hover:bg-surface"
+                      >
+                        {isOpen ? (
+                          <ChevronDown size={16} className="shrink-0 text-ink-faint" />
+                        ) : (
+                          <ChevronRight size={16} className="shrink-0 text-ink-faint" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-ink">
+                              {p.greenhouse}
+                              {p.bedCode && ` · ${p.bedCode}`}
+                            </span>
+                            <Badge>
+                              {p.products.length} product
+                              {p.products.length === 1 ? "" : "s"}
+                            </Badge>
+                            {p.fromRecommendation && (
+                              <Badge color="#059669">From recommendation</Badge>
+                            )}
+                            {p.hazardous && <Badge color="#dc2626">Hazardous</Badge>}
+                          </div>
+                          <p className="mt-0.5 text-xs text-ink-faint">
+                            {formatDate(p.date)}
+                            {p.coverage && ` · ${p.coverage}`}
+                            {p.varietyCode && ` · ${p.varietyCode}`}
+                            {p.safeHarvest && ` · safe to cut ${formatDate(p.safeHarvest)}`}
+                          </p>
                         </div>
-                        <p className="mt-0.5 text-xs text-ink-faint">
-                          {formatDate(p.date)}
-                          {p.coverage && ` · ${p.coverage}`}
-                          {p.varietyCode && ` · ${p.varietyCode}`}
-                          {p.safeHarvest && ` · safe to cut ${formatDate(p.safeHarvest)}`}
-                        </p>
-                      </div>
-                      <span className="shrink-0 text-sm font-bold tabular-nums text-ink">
-                        {money(p.totalCost)}
-                      </span>
-                    </button>
+                        <span className="shrink-0 text-sm font-bold tabular-nums text-ink">
+                          {money(p.totalCost)}
+                        </span>
+                      </button>
+                    </div>
 
                     {isOpen && (
                       <div className="border-t border-line bg-surface/60 px-5 py-3">
+                        {/* Shared tank & timing detail from the spray sheet */}
+                        <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-ink-faint">
+                          {p.products[0]?.type_of_application && (
+                            <span>
+                              Type:{" "}
+                              <span className="font-medium text-ink-soft">
+                                {p.products[0].type_of_application}
+                              </span>
+                            </span>
+                          )}
+                          {p.products[0]?.volume_of_water && (
+                            <span>
+                              Water:{" "}
+                              <span className="font-medium text-ink-soft">
+                                {p.products[0].volume_of_water}
+                              </span>
+                            </span>
+                          )}
+                          {p.products[0]?.partition_no && (
+                            <span>
+                              Partition:{" "}
+                              <span className="font-medium text-ink-soft">
+                                {p.products[0].partition_no}
+                              </span>
+                            </span>
+                          )}
+                          {p.products[0]?.rei && (
+                            <span>
+                              Re-entry:{" "}
+                              <span className="font-medium text-ink-soft">
+                                {p.products[0].rei}h
+                              </span>
+                            </span>
+                          )}
+                          {p.products[0]?.start_time && (
+                            <span>
+                              Started:{" "}
+                              <span className="font-medium text-ink-soft">
+                                {p.products[0].start_time}
+                              </span>
+                            </span>
+                          )}
+                        </div>
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="text-left text-xs uppercase tracking-wide text-ink-faint">
@@ -364,7 +413,7 @@ export default function SprayPage() {
                                   {r.who_class ? (
                                     <Badge
                                       color={
-                                        ["IA", "IB", "II"].includes(r.who_class)
+                                        isHazardous(r.who_class)
                                           ? "#dc2626"
                                           : undefined
                                       }

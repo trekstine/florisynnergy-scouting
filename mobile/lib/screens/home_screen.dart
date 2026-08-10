@@ -242,8 +242,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: Colors.white.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.local_florist_outlined,
-                  size: 20, color: Colors.white),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+              ),
             ),
             const SizedBox(width: 12),
             Text(

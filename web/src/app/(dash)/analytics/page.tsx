@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import {
   AlertTriangle,
+  ArrowRight,
   Bug,
   Building2,
   Download,
@@ -10,6 +11,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import {
@@ -17,7 +19,8 @@ import {
   Donut,
   HBarChart,
   HeatMatrix,
-  ParetoChart,
+  MultiLineChart,
+  RankedBarChart,
   SeverityHistogram,
   SprayTimingChart,
   StackedBarChart,
@@ -25,6 +28,9 @@ import {
 } from "@/components/charts";
 import { FilterBar, defaultFilters } from "@/components/FilterBar";
 import { PaginationBar, usePagination } from "@/components/Pagination";
+import { ScoutMovementPanel } from "@/components/ScoutMovementPanel";
+import { SprayProgramsTable } from "@/components/SprayProgramsTable";
+import type { Program } from "@/components/SprayProgramsTable";
 import {
   Badge,
   Card,
@@ -42,6 +48,7 @@ import {
   severityHex,
 } from "@/lib/format";
 import {
+  useAgentTrend,
   useBreakdown,
   useDiseases,
   useEmployees,
@@ -56,6 +63,7 @@ import {
   useTrend,
   useVarieties,
 } from "@/lib/hooks";
+import { programKey } from "@/lib/sprayExport";
 import type { Filters, ScoutingRecord, SprayRecord } from "@/lib/types";
 
 // ── Report registry ─────────────────────────────────────────────────────
@@ -95,6 +103,10 @@ const SCOUTING_TYPE_COLORS: Record<string, string> = {
   lure: "#6366f1",
   sticky_trap: "#0ea5e9",
 };
+
+/** Distinct hues so six overlapping lines stay tellable apart. */
+const PEST_LINE_COLORS = ["#10b981", "#0ea5e9", "#6366f1", "#f59e0b", "#ec4899", "#14b8a6"];
+const DISEASE_LINE_COLORS = ["#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#65a30d", "#db2777"];
 
 const STACK_COLORS = ["#0ea5e9", "#6366f1", "#f59e0b", "#10b981", "#dc2626", "#7c3aed", "#94a3b8"];
 
@@ -154,6 +166,7 @@ export default function AnalyticsPage() {
 
   const summary = useSummary(filters);
   const trend = useTrend(filters);
+  const agentTrend = useAgentTrend(filters);
   const pestBreak = useBreakdown("pest", filters);
   const diseaseBreak = useBreakdown("disease", filters);
   const varietyBreak = useBreakdown("variety", filters);
@@ -181,6 +194,13 @@ export default function AnalyticsPage() {
   const ghName = useMemo(() => {
     const m = new Map<number, string>();
     for (const g of greenhouses.data ?? []) m.set(g.id, g.name);
+    return m;
+  }, [greenhouses.data]);
+
+  /** Short codes (GH03) for chart axes and dense tables. */
+  const ghCode = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const g of greenhouses.data ?? []) m.set(g.id, g.code ?? g.name);
     return m;
   }, [greenhouses.data]);
 
@@ -340,15 +360,37 @@ export default function AnalyticsPage() {
   const coverageBreakdown = useMemo(() => countBy(filteredSpray, (r) => r.coverage), [filteredSpray]);
   const chemicalBreakdown = useMemo(() => countBy(filteredSpray, (r) => r.product), [filteredSpray]);
   const chemicalCostBreakdown = useMemo(() => costBy(filteredSpray, (r) => r.product), [filteredSpray]);
-  const varietyCostBreakdown = useMemo(() => costBy(filteredSpray, (r) => r.variety_code), [filteredSpray]);
+  // Full variety names, not the three-letter code the record stores.
+  const varietyCostBreakdown = useMemo(
+    () =>
+      costBy(filteredSpray, (r) =>
+        r.variety_code ? varietyName.get(r.variety_code) ?? r.variety_code : null,
+      ),
+    [filteredSpray, varietyName],
+  );
 
+  // Block *codes* on the axis — "Greenhouse 03" wraps and rotates; "GH03"
+  // reads at a glance, which is the point of an axis label.
   const greenhouseCostBreakdown = useMemo(
     () =>
       costBy(filteredSpray, (r) =>
-        r.greenhouse_id != null ? ghName.get(r.greenhouse_id) ?? `GH #${r.greenhouse_id}` : null,
+        r.greenhouse_id != null ? ghCode.get(r.greenhouse_id) ?? `GH#${r.greenhouse_id}` : null,
       ),
-    [filteredSpray, ghName],
+    [filteredSpray, ghCode],
   );
+
+  /** Litres/kg of product actually applied — spend hides a cheap product used heavily. */
+  const chemicalQtyBreakdown = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const r of filteredSpray) {
+      const key = r.product?.trim() || "Unspecified";
+      totals.set(key, (totals.get(key) ?? 0) + (r.qty ?? 0));
+    }
+    return Array.from(totals.entries())
+      .map(([label, value]) => ({ label, value: Math.round(value * 1000) / 1000 }))
+      .filter((r) => r.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [filteredSpray]);
 
   const totalSprayCost = useMemo(
     () => filteredSpray.reduce((s, r) => s + (r.cost_of_chemical ?? 0), 0),
@@ -421,34 +463,24 @@ export default function AnalyticsPage() {
 
   // One row per spray program: window, products, greenhouses, cost, PHI status.
   const programs = useMemo(() => {
-    type ProgramRow = {
-      program: string;
-      applications: number;
-      products: Set<string>;
-      greenhouses: Set<string>;
-      totalCost: number;
-      firstDate: string | null;
-      lastDate: string | null;
-      activePhiUntil: string | null;
-    };
-    const map = new Map<string, ProgramRow>();
+    const map = new Map<string, Program>();
     const now = Date.now();
     for (const row of filteredSpray) {
-      const key = row.program_id?.trim() || `Unassigned (#${row.id})`;
-      const entry: ProgramRow = map.get(key) ?? {
+      const key = programKey(row);
+      const entry: Program = map.get(key) ?? {
         program: key,
-        applications: 0,
         products: new Set<string>(),
         greenhouses: new Set<string>(),
         totalCost: 0,
         firstDate: null,
         lastDate: null,
         activePhiUntil: null,
+        records: [],
       };
-      entry.applications += 1;
+      entry.records.push(row);
       if (row.product) entry.products.add(row.product);
       if (row.greenhouse_id != null) {
-        entry.greenhouses.add(ghName.get(row.greenhouse_id) ?? `GH #${row.greenhouse_id}`);
+        entry.greenhouses.add(ghCode.get(row.greenhouse_id) ?? `GH#${row.greenhouse_id}`);
       }
       entry.totalCost += row.cost_of_chemical ?? 0;
       const d = row.start_date ?? row.recorded_at;
@@ -463,11 +495,12 @@ export default function AnalyticsPage() {
       map.set(key, entry);
     }
     return Array.from(map.values()).sort((a, b) => (b.lastDate ?? "").localeCompare(a.lastDate ?? ""));
-  }, [filteredSpray, ghName]);
+  }, [filteredSpray, ghCode]);
 
   const scoutingTable = usePagination(filteredScoutingRecords, 25, recordSearch);
   const movementTable = usePagination(scouts.data ?? [], 10);
-  const programsTable = usePagination(programs, 10);
+  // Which scout the manager drilled into on the Movement tab.
+  const [selectedScout, setSelectedScout] = useState<number | null>(null);
 
   const summaryCards = [
     {
@@ -493,7 +526,8 @@ export default function AnalyticsPage() {
     {
       label: "Open recs",
       value: summary.data ? summary.data.open_recommendations.toLocaleString() : "—",
-      hint: "Needs follow-up",
+      hint: "Needs follow-up · open",
+      href: "/recommendations",
     },
     {
       label: "Active scouts",
@@ -509,6 +543,48 @@ export default function AnalyticsPage() {
       invert: true,
     },
   ];
+
+  /**
+   * Pivot the per-agent trend into recharts' row-per-date shape, one column
+   * per agent. Only the busiest agents get a line — a dozen overlapping
+   * series is unreadable.
+   */
+  function pivotTrend(kind: "pest" | "disease") {
+    const points = (agentTrend.data ?? []).filter((p) => p.agent_kind === kind);
+    const totals = new Map<string, number>();
+    for (const p of points) {
+      totals.set(p.agent_name, (totals.get(p.agent_name) ?? 0) + p.records);
+    }
+    const series = [...totals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name]) => name);
+
+    const byDate = new Map<string, Record<string, string | number | null>>();
+    for (const p of points) {
+      if (!series.includes(p.agent_name)) continue;
+      const row = byDate.get(p.date) ?? { date: p.date };
+      row[p.agent_name] = p.avg_severity;
+      byDate.set(p.date, row);
+    }
+    return {
+      series,
+      rows: [...byDate.values()].sort((a, b) =>
+        String(a.date).localeCompare(String(b.date)),
+      ),
+    };
+  }
+
+  const pestTrend = useMemo(
+    () => pivotTrend("pest"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentTrend.data],
+  );
+  const diseaseTrend = useMemo(
+    () => pivotTrend("disease"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentTrend.data],
+  );
 
   /** Greenhouses ranked by average severity — the "where to look" list. */
   const ghLeaderboard = useMemo(
@@ -1023,7 +1099,7 @@ export default function AnalyticsPage() {
           <div className="px-6">
             <Card>
               <CardHeader
-                title="Pest × greenhouse matrix"
+                title="Pest / Disease × greenhouse matrix"
                 subtitle="Average severity (green → red)"
               />
               <div className="p-4">
@@ -1053,6 +1129,47 @@ export default function AnalyticsPage() {
               </div>
             </Card>
           </div>
+          {/* Per-agent trajectories — compare an agent against the
+              interventions made against it. */}
+          <div className="grid grid-cols-1 gap-5 px-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader
+                title="Trend per pest"
+                subtitle="Average severity per day, one line per pest."
+              />
+              <div className="p-4">
+                {agentTrend.isLoading ? (
+                  <Spinner />
+                ) : (
+                  <MultiLineChart
+                    data={pestTrend.rows}
+                    series={pestTrend.series}
+                    colors={PEST_LINE_COLORS}
+                    height={260}
+                  />
+                )}
+              </div>
+            </Card>
+            <Card>
+              <CardHeader
+                title="Trend per disease"
+                subtitle="Average severity per day, one line per disease."
+              />
+              <div className="p-4">
+                {agentTrend.isLoading ? (
+                  <Spinner />
+                ) : (
+                  <MultiLineChart
+                    data={diseaseTrend.rows}
+                    series={diseaseTrend.series}
+                    colors={DISEASE_LINE_COLORS}
+                    height={260}
+                  />
+                )}
+              </div>
+            </Card>
+          </div>
+
           <div className="px-6">
             <Card>
               <CardHeader
@@ -1072,9 +1189,12 @@ export default function AnalyticsPage() {
       )}
 
       {activeTab === "movement" && (
-        <div className="px-6">
+        <div className="space-y-4 px-6">
           <Card>
-            <CardHeader title="Movement report" subtitle="Records & coverage in range" />
+            <CardHeader
+              title="Movement report"
+              subtitle="Click a scout to trace their walk bed by bed"
+            />
             <div className="overflow-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -1082,21 +1202,38 @@ export default function AnalyticsPage() {
                     <th className="px-5 py-2.5 font-semibold">Scout</th>
                     <th className="px-3 py-2.5 font-semibold">Records</th>
                     <th className="px-3 py-2.5 font-semibold">Greenhouses</th>
+                    <th className="px-3 py-2.5 font-semibold">Beds</th>
                     <th className="px-3 py-2.5 font-semibold">Last seen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {movementTable.paged.map((s) => (
-                    <tr key={s.scout_id} className="hover:bg-surface">
-                      <td className="px-5 py-2.5 font-medium">{s.name}</td>
-                      <td className="px-3 py-2.5 tabular-nums">{s.records}</td>
-                      <td className="px-3 py-2.5 tabular-nums">{s.greenhouses_visited}</td>
-                      <td className="px-3 py-2.5 text-ink-faint">{relativeTime(s.last_seen)}</td>
-                    </tr>
-                  ))}
+                  {movementTable.paged.map((s) => {
+                    const on = s.scout_id === selectedScout;
+                    return (
+                      <tr
+                        key={s.scout_id}
+                        onClick={() => setSelectedScout(on ? null : s.scout_id)}
+                        className={`cursor-pointer ${on ? "bg-brand-50" : "hover:bg-surface"}`}
+                      >
+                        <td className="px-5 py-2.5 font-medium">
+                          <span className="flex items-center gap-2">
+                            <span
+                              className="h-1.5 w-1.5 rounded-full"
+                              style={{ backgroundColor: on ? "#059669" : "transparent" }}
+                            />
+                            {s.name}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 tabular-nums">{s.records}</td>
+                        <td className="px-3 py-2.5 tabular-nums">{s.greenhouses_visited}</td>
+                        <td className="px-3 py-2.5 tabular-nums">{s.beds_visited}</td>
+                        <td className="px-3 py-2.5 text-ink-faint">{relativeTime(s.last_seen)}</td>
+                      </tr>
+                    );
+                  })}
                   {scouts.data?.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-5 py-6 text-center text-ink-faint">
+                      <td colSpan={5} className="px-5 py-6 text-center text-ink-faint">
                         No scout activity.
                       </td>
                     </tr>
@@ -1114,6 +1251,8 @@ export default function AnalyticsPage() {
               pageSizeOptions={[10, 25, 50]}
             />
           </Card>
+
+          <ScoutMovementPanel scoutId={selectedScout} filters={filters} />
         </div>
       )}
 
@@ -1159,80 +1298,14 @@ export default function AnalyticsPage() {
             </Card>
           </div>
           <div className="px-6">
-            <Card>
-              <CardHeader
-                title="Programs"
-                subtitle="One row per spray program: window, products, greenhouses, and PHI status."
-              />
-              <div className="overflow-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
-                      <th className="px-5 py-2.5 font-semibold">Program</th>
-                      <th className="px-3 py-2.5 font-semibold">Greenhouses</th>
-                      <th className="px-3 py-2.5 font-semibold">Applications</th>
-                      <th className="px-3 py-2.5 font-semibold">Products</th>
-                      <th className="px-3 py-2.5 font-semibold">Window</th>
-                      <th className="px-3 py-2.5 font-semibold">Cost</th>
-                      <th className="px-3 py-2.5 font-semibold">PHI status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line">
-                    {spray.isLoading ? (
-                      <tr>
-                        <td colSpan={7} className="px-3 py-6">
-                          <Spinner label="Loading programs…" />
-                        </td>
-                      </tr>
-                    ) : programs.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="px-5 py-6 text-center text-ink-faint">
-                          No spray programs in range.
-                        </td>
-                      </tr>
-                    ) : (
-                      programsTable.paged.map((p) => (
-                        <tr key={p.program} className="hover:bg-surface">
-                          <td className="px-5 py-2.5 font-medium text-ink">{p.program}</td>
-                          <td className="px-3 py-2.5 text-ink-soft">
-                            {[...p.greenhouses].join(", ") || "—"}
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums">{p.applications}</td>
-                          <td className="px-3 py-2.5 text-ink-soft">
-                            {[...p.products].join(", ") || "—"}
-                          </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap text-ink-faint">
-                            {p.firstDate ? new Date(p.firstDate).toLocaleDateString("en-GB", { dateStyle: "medium" }) : "—"}
-                            {" – "}
-                            {p.lastDate ? new Date(p.lastDate).toLocaleDateString("en-GB", { dateStyle: "medium" }) : "—"}
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums text-ink">{money(p.totalCost)}</td>
-                          <td className="px-3 py-2.5">
-                            {p.activePhiUntil ? (
-                              <Badge color="#dc2626">
-                                Active until{" "}
-                                {new Date(p.activePhiUntil).toLocaleDateString("en-GB", { dateStyle: "medium" })}
-                              </Badge>
-                            ) : (
-                              <Badge color="#059669">Cleared</Badge>
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <PaginationBar
-                page={programsTable.page}
-                totalPages={programsTable.totalPages}
-                pageSize={programsTable.pageSize}
-                total={programsTable.total}
-                onPage={programsTable.setPage}
-                onPageSize={programsTable.setPageSize}
-                pageSizeOptions={[10, 25, 50]}
-              />
-            </Card>
+            <SprayProgramsTable
+              programs={programs}
+              loading={spray.isLoading}
+              ghName={ghName}
+              varietyName={varietyName}
+              employeeName={scoutName}
+              rangeLabel={`${filters.start}_to_${filters.end}`}
+            />
           </div>
         </>
       )}
@@ -1309,7 +1382,7 @@ export default function AnalyticsPage() {
           <Card>
             <CardHeader
               title="Greenhouse cost report"
-              subtitle={`Total ${money(totalSprayCost)} in the selected range — cumulative % shows where spend concentrates.`}
+              subtitle={`Total ${money(totalSprayCost)} in the selected range, by block.`}
             />
             <div className="p-4">
               {spray.isLoading ? (
@@ -1317,10 +1390,13 @@ export default function AnalyticsPage() {
               ) : greenhouseCostBreakdown.length === 0 ? (
                 <EmptyState>No spray records in range.</EmptyState>
               ) : (
-                <ParetoChart
+                <RankedBarChart
                   data={greenhouseCostBreakdown.slice(0, 12).map((r) => ({ label: r.label, value: r.value }))}
                   color="#059669"
-                  height={280}
+                  height={300}
+                  seriesLabel="Spray spend"
+                  format="money"
+                  unitNote="Top 12 blocks by spend"
                 />
               )}
             </div>
@@ -1329,56 +1405,90 @@ export default function AnalyticsPage() {
       )}
 
       {activeTab === "chemicals" && (
-        <div className="grid grid-cols-1 gap-5 px-6 lg:grid-cols-2">
+        <div className="space-y-5 px-6">
           <Card>
-            <CardHeader title="Chemical usage" subtitle="Most frequently applied products, by count." />
-            <div className="p-4">
-              {spray.isLoading ? (
-                <Spinner />
-              ) : chemicalBreakdown.length === 0 ? (
-                <EmptyState>No spray product data in range.</EmptyState>
-              ) : (
-                <HBarChart
-                  data={chemicalBreakdown.slice(0, 8).map((r) => ({ label: r.label, value: r.value }))}
-                  color="#7c3aed"
-                  height={220}
-                />
-              )}
-            </div>
-          </Card>
-          <Card>
-            <CardHeader title="Chemical spend" subtitle="Same products, ranked by total cost — with cumulative % concentration." />
+            <CardHeader
+              title="Chemical spend"
+              subtitle="Products ranked by total cost in the selected range."
+            />
             <div className="p-4">
               {spray.isLoading ? (
                 <Spinner />
               ) : chemicalCostBreakdown.length === 0 ? (
                 <EmptyState>No spray cost data in range.</EmptyState>
               ) : (
-                <ParetoChart
+                <RankedBarChart
                   data={chemicalCostBreakdown.slice(0, 10).map((r) => ({ label: r.label, value: r.value }))}
                   color="#dc2626"
-                  height={260}
+                  height={300}
+                  seriesLabel="Spend"
+                  format="money"
                 />
               )}
             </div>
           </Card>
+
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <Card>
+              <CardHeader
+                title="Quantity used"
+                subtitle="How much product actually went out — a cheap product used heavily hides in a spend chart."
+              />
+              <div className="p-4">
+                {spray.isLoading ? (
+                  <Spinner />
+                ) : chemicalQtyBreakdown.length === 0 ? (
+                  <EmptyState>No product quantities recorded in range.</EmptyState>
+                ) : (
+                  <HBarChart
+                    data={chemicalQtyBreakdown.slice(0, 8)}
+                    color="#0891b2"
+                    height={220}
+                    seriesLabel="Quantity (L / kg)"
+                  />
+                )}
+              </div>
+            </Card>
+            <Card>
+              <CardHeader
+                title="Application frequency"
+                subtitle="How often each product was applied, by count."
+              />
+              <div className="p-4">
+                {spray.isLoading ? (
+                  <Spinner />
+                ) : chemicalBreakdown.length === 0 ? (
+                  <EmptyState>No spray product data in range.</EmptyState>
+                ) : (
+                  <HBarChart
+                    data={chemicalBreakdown.slice(0, 8).map((r) => ({ label: r.label, value: r.value }))}
+                    color="#7c3aed"
+                    height={220}
+                    seriesLabel="Applications"
+                  />
+                )}
+              </div>
+            </Card>
+          </div>
         </div>
       )}
 
       {activeTab === "variety-cost" && (
         <div className="px-6">
           <Card>
-            <CardHeader title="Variety cost report" subtitle="Spray spend concentrated by variety, with cumulative % of total." />
+            <CardHeader title="Variety cost report" subtitle="Spray spend by crop variety in the selected range." />
             <div className="p-4">
               {spray.isLoading ? (
                 <Spinner />
               ) : varietyCostBreakdown.length === 0 ? (
                 <EmptyState>No variety cost data in range.</EmptyState>
               ) : (
-                <ParetoChart
+                <RankedBarChart
                   data={varietyCostBreakdown.slice(0, 10).map((r) => ({ label: r.label, value: r.value }))}
                   color="#dc2626"
-                  height={280}
+                  height={300}
+                  seriesLabel="Spray spend"
+                  format="money"
                 />
               )}
             </div>
@@ -1428,6 +1538,7 @@ function Kpi({
   pct,
   invert = false,
   loading,
+  href,
 }: {
   label: string;
   value: string;
@@ -1435,13 +1546,18 @@ function Kpi({
   pct?: number | null;
   invert?: boolean;
   loading?: boolean;
+  /** When set the tile becomes a link — e.g. open recs → /recommendations. */
+  href?: string;
 }) {
   const up = (pct ?? 0) > 0;
   const good = pct == null || pct === 0 ? null : invert ? !up : up;
 
-  return (
-    <Card className="p-4">
-      <p className="text-xs font-medium text-ink-faint">{label}</p>
+  const body = (
+    <>
+      <p className="flex items-center gap-1 text-xs font-medium text-ink-faint">
+        {label}
+        {href && <ArrowRight size={11} className="opacity-60" />}
+      </p>
       <div className="mt-1.5 flex items-baseline gap-2">
         <span className="text-2xl font-bold tabular-nums text-ink">
           {loading ? "—" : value}
@@ -1459,8 +1575,20 @@ function Kpi({
         )}
       </div>
       <p className="mt-1 text-[11px] text-ink-faint">{hint}</p>
-    </Card>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="rounded-xl border border-line bg-white p-4 shadow-card transition-colors hover:border-brand-300 hover:bg-surface"
+      >
+        {body}
+      </Link>
+    );
+  }
+  return <Card className="p-4">{body}</Card>;
 }
 
 function Breakdown({
@@ -1470,11 +1598,18 @@ function Breakdown({
 }: {
   title: string;
   q: {
-    data?: { key: string; records: number; over_threshold: number }[];
+    data?: {
+      key: string;
+      records: number;
+      avg_severity: number;
+      over_threshold: number;
+      beds: string[];
+    }[];
     isLoading: boolean;
   };
   color: string;
 }) {
+  const rows = (q.data ?? []).slice(0, 8);
   const total = (q.data ?? []).reduce((s, r) => s + r.records, 0);
   return (
     <Card>
@@ -1482,14 +1617,47 @@ function Breakdown({
       <div className="p-4">
         {q.isLoading ? (
           <Spinner />
-        ) : (q.data ?? []).length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState>No data.</EmptyState>
         ) : (
-          <HBarChart
-            data={(q.data ?? []).slice(0, 8).map((r) => ({ label: r.key, value: r.records }))}
-            color={color}
-            height={200}
-          />
+          <>
+            <HBarChart
+              data={rows.map((r) => ({ label: r.key, value: r.records }))}
+              color={color}
+              height={200}
+            />
+            {/* Where it's happening — a count alone doesn't tell you where to go. */}
+            <ul className="mt-3 space-y-1.5 border-t border-line pt-3">
+              {rows.map((r) => (
+                <li
+                  key={r.key}
+                  className="flex items-start justify-between gap-3 text-xs"
+                  title={
+                    r.beds.length
+                      ? `${r.key} on ${r.beds.join(", ")}`
+                      : `${r.key} — no bed recorded`
+                  }
+                >
+                  <span className="min-w-0 flex-1 truncate font-medium text-ink-soft">
+                    {r.key}
+                  </span>
+                  <span className="shrink-0 text-right text-ink-faint">
+                    {r.beds.length ? (
+                      <>
+                        {r.beds.slice(0, 3).join(", ")}
+                        {r.beds.length > 3 && ` +${r.beds.length - 3}`}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] text-ink-faint">
+              Beds where each was recorded · hover for the full list
+            </p>
+          </>
         )}
       </div>
     </Card>

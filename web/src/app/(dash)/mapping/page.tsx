@@ -1,12 +1,13 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { Grid3x3, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { BedManager } from "@/components/BedManager";
 import { MappingMap } from "@/components/map";
 import { Button, Card, CardHeader, ErrorBox, Field, TextInput } from "@/components/ui";
 import { useCreateGreenhouse, useDeleteGreenhouse, useGreenhouses } from "@/lib/hooks";
-import type { Coordinate } from "@/lib/types";
+import type { Coordinate, Greenhouse } from "@/lib/types";
 
 type Mode = "rectangle" | "polygon";
 
@@ -31,6 +32,7 @@ export default function MappingPage() {
   const createGh = useCreateGreenhouse();
   const deleteGh = useDeleteGreenhouse();
 
+  const [bedsFor, setBedsFor] = useState<Greenhouse | null>(null);
   const [mode, setMode] = useState<Mode>("rectangle");
   const [vertices, setVertices] = useState<Coordinate[]>([]);
   const [cursor, setCursor] = useState<Coordinate | null>(null);
@@ -76,12 +78,15 @@ export default function MappingPage() {
     if (!canSave) return setError("Draw a greenhouse boundary first.");
     if (!name.trim()) return setError("Name is required.");
     try {
-      await createGh.mutateAsync({
+      const created = await createGh.mutateAsync({
         name: name.trim(),
         qr_code_hash: (qr.trim() || autoQr(name)).trim(),
         boundary: vertices,
       });
       reset();
+      // Beds are the pressure-index denominator, so go straight to
+      // registering them rather than leaving the block at zero.
+      if (created) setBedsFor(created);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save.");
     }
@@ -161,28 +166,51 @@ export default function MappingPage() {
         </Card>
 
         <Card>
-          <CardHeader title={`Greenhouses (${greenhouses.data?.length ?? 0})`} />
+          <CardHeader
+            title={`Greenhouses (${greenhouses.data?.length ?? 0})`}
+            subtitle="Register every bed — pressure indices divide by bed count."
+          />
           <ul className="divide-y divide-line">
             {(greenhouses.data ?? []).map((g) => (
               <li key={g.id} className="flex items-center justify-between px-4 py-2.5">
-                <div>
+                <div className="min-w-0">
                   <span className="text-sm font-medium text-ink">{g.name}</span>
-                  <span className="ml-2 text-xs text-ink-faint">{g.bed_count} beds</span>
+                  <span
+                    className={
+                      "ml-2 text-xs " +
+                      (g.bed_count === 0 ? "font-semibold text-amber-600" : "text-ink-faint")
+                    }
+                  >
+                    {g.bed_count === 0 ? "no beds registered" : `${g.bed_count} beds`}
+                  </span>
                 </div>
-                <button
-                  className="text-ink-faint hover:text-red-600"
-                  disabled={deleteGh.isPending}
-                  onClick={() => {
-                    if (confirm(`Delete ${g.name}? Removes its beds & records.`)) deleteGh.mutate(g.id);
-                  }}
-                >
-                  <Trash2 size={16} />
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => setBedsFor(g)}
+                    title="Manage beds"
+                    className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-semibold text-ink-soft hover:bg-surface"
+                  >
+                    <Grid3x3 size={13} /> Beds
+                  </button>
+                  <button
+                    className="p-1 text-ink-faint hover:text-red-600"
+                    disabled={deleteGh.isPending}
+                    onClick={() => {
+                      if (confirm(`Delete ${g.name}? Removes its beds & records.`)) deleteGh.mutate(g.id);
+                    }}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         </Card>
       </aside>
+
+      {bedsFor && (
+        <BedManager greenhouse={bedsFor} onClose={() => setBedsFor(null)} />
+      )}
     </div>
   );
 }

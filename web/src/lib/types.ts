@@ -63,6 +63,8 @@ export interface Pest {
   name: string;
   category: string | null;
   threshold: number;
+  /** Pressure-index ETL: Σ(per-bed severity) ÷ beds scouted, per block. */
+  pressure_threshold: number;
   is_active: boolean;
 }
 
@@ -70,6 +72,7 @@ export interface Disease {
   id: number;
   name: string;
   threshold: number;
+  pressure_threshold: number;
   is_active: boolean;
 }
 
@@ -77,12 +80,19 @@ export interface Chemical {
   id: number;
   name: string;
   product: string | null;
+  type_of_application: string | null;
+  rate: string | null;
   who_class: string | null;
   rac_code: string | null;
   active_ingredient1: string | null;
   target1: string | null;
+  target2: string | null;
   rei: string | null;
   buying_price: number | null;
+  /** Dosing fields — the spray builder needs these to price a product. */
+  rate_per_ha: number | null;
+  water_rate_l_per_ha: number | null;
+  phi_days: number | null;
 }
 
 export interface ScoutingRecord {
@@ -119,16 +129,32 @@ export interface SprayRecord {
   recommendation_id: number | null;
   greenhouse_id: number | null;
   bed_code: string | null;
+  partition_no: string | null;
   variety_code: string | null;
   product: string | null;
+  type_of_application: string | null;
   rate: string | null;
+  volume_of_water: string | null;
   coverage: string | null;
   who_class: string | null;
+  rac_code: string | null;
+  rei: string | null;
+  active_ingredient1: string | null;
+  active_ingredient2: string | null;
+  target1: string | null;
+  target2: string | null;
+  chemical_id: number | null;
+  scout_id: number | null;
+  area_ha: number | null;
   qty: number | null;
+  buying_price: number | null;
   cost_of_chemical: number | null;
   phi_days: number | null;
   safe_harvest_date: string | null;
+  comments: string | null;
   start_date: string | null;
+  start_time: string | null;
+  scout_report_date: string | null;
   recorded_at: string;
 }
 
@@ -199,10 +225,42 @@ export interface GreenhousePressure {
   avg_severity: number;
   over_threshold: number;
   pressure: Pressure;
+  /** Worst active issue, e.g. "Powdery Mildew severity 4 detected on Bed 4". */
+  headline: string | null;
+}
+
+/** Per-greenhouse, per-agent pressure — pests and diseases never blended. */
+export interface AgentPressure {
+  greenhouse_id: number;
+  agent_kind: "pest" | "disease";
+  agent_id: number;
+  agent_name: string;
+  records: number;
+  beds_observed: number;
+  beds_scouted: number;
+  total_severity: number;
+  pressure_index: number;
+  max_severity: number;
+  hotspot_bed: string | null;
+  pressure_threshold: number;
+  over_etl: boolean;
+  hotspot: boolean;
+  action_required: boolean;
+}
+
+/** One day's reading for one pest or disease. */
+export interface AgentTrendPoint {
+  date: string;
+  agent_kind: "pest" | "disease";
+  agent_name: string;
+  records: number;
+  avg_severity: number;
+  max_severity: number;
 }
 
 export interface PestMatrixCell {
   pest: string;
+  kind: "pest" | "disease";
   greenhouse: string;
   records: number;
   avg_severity: number;
@@ -250,7 +308,41 @@ export interface ScoutSummary {
   name: string;
   records: number;
   greenhouses_visited: number;
+  beds_visited: number;
   last_seen: string | null;
+}
+
+export interface MovementStop {
+  started_at: string;
+  ended_at: string;
+  minutes: number | null;
+  greenhouse_id: number | null;
+  greenhouse: string;
+  bed_code: string | null;
+  records: number;
+  max_severity: number;
+  agents: string[];
+}
+
+export interface MovementDay {
+  date: string;
+  records: number;
+  beds: number;
+  greenhouses: string[];
+  first_seen: string;
+  last_seen: string;
+  active_minutes: number;
+  stops: MovementStop[];
+}
+
+export interface ScoutMovement {
+  scout_id: number;
+  name: string;
+  days: MovementDay[];
+  total_records: number;
+  total_beds: number;
+  active_minutes: number;
+  median_minutes_per_bed: number | null;
 }
 
 export interface SprayCostRow {
@@ -302,6 +394,8 @@ export interface BreakdownRow {
   records: number;
   avg_severity: number;
   over_threshold: number;
+  /** Beds where this agent/variety was seen — shown on hover. */
+  beds: string[];
 }
 
 export interface SeverityBucket {

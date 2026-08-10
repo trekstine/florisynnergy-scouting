@@ -337,7 +337,7 @@ function LoginForm() {
                   <p className="text-xl font-bold leading-tight text-white">
                     Flori<span className="text-brand-400">Synergy</span>
                   </p>
-                  <p className="text-xs font-medium text-white/50">( Scouting )</p>
+                  <p className="text-xs font-medium text-white/50">( IPM )</p>
                 </div>
               </div>
 

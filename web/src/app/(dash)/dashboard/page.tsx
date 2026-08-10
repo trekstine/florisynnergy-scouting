@@ -375,6 +375,11 @@ export default function DashboardPage() {
                           <p className="mt-0.5 text-[10px] text-ink-faint">over ETL</p>
                         </div>
                       </div>
+                      {hovered.headline && (
+                        <p className="mt-2 text-[11px] font-semibold text-red-600">
+                          {hovered.headline}
+                        </p>
+                      )}
                       <p className="mt-2.5 border-t border-line pt-2 text-[11px] text-ink-faint">
                         Click to open this block
                       </p>
@@ -614,26 +619,34 @@ export default function DashboardPage() {
               <EmptyState>No pressure data.</EmptyState>
             ) : (
               hotBlocks.map((b) => (
-                <div key={b.greenhouse_id} className="flex items-center gap-2.5">
-                  <span className="w-16 shrink-0 truncate text-sm font-medium text-ink">
-                    {b.name}
-                  </span>
-                  <div className="h-5 flex-1 overflow-hidden rounded bg-surface">
-                    <div
-                      className="flex h-full items-center justify-end rounded px-1.5"
-                      style={{
-                        width: `${Math.max(10, (b.avg_severity / 5) * 100)}%`,
-                        backgroundColor: PRESSURE_HEX[b.pressure],
-                      }}
-                    >
-                      <span className="text-[10px] font-bold text-white">
-                        {b.avg_severity.toFixed(1)}
-                      </span>
+                <div key={b.greenhouse_id}>
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-16 shrink-0 truncate text-sm font-medium text-ink">
+                      {b.name}
+                    </span>
+                    <div className="h-5 flex-1 overflow-hidden rounded bg-surface">
+                      <div
+                        className="flex h-full items-center justify-end rounded px-1.5"
+                        style={{
+                          width: `${Math.max(10, (b.avg_severity / 5) * 100)}%`,
+                          backgroundColor: PRESSURE_HEX[b.pressure],
+                        }}
+                      >
+                        <span className="text-[10px] font-bold text-white">
+                          {b.avg_severity.toFixed(1)}
+                        </span>
+                      </div>
                     </div>
+                    <span className="w-10 shrink-0 text-right text-[11px] text-ink-faint">
+                      {PRESSURE_LABEL[b.pressure]}
+                    </span>
                   </div>
-                  <span className="w-10 shrink-0 text-right text-[11px] text-ink-faint">
-                    {PRESSURE_LABEL[b.pressure]}
-                  </span>
+                  {/* Names the agent driving the band, rather than a bare number. */}
+                  {b.headline && (
+                    <p className="ml-[4.6rem] mt-0.5 truncate text-[11px] text-ink-faint">
+                      {b.headline}
+                    </p>
+                  )}
                 </div>
               ))
             )}

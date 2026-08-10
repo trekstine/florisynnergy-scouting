@@ -1,30 +1,37 @@
 "use client";
 
-import {
-  ArrowRight,
-  FlaskConical,
-  PenTool,
-  Users,
-} from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { LogoMark } from "@/components/Logo";
-import { PageHeader } from "@/components/ui";
 import {
   useChemicals,
   useDiseases,
   useEmployees,
+  useEtlRules,
   useGreenhouses,
   usePests,
   useVarieties,
 } from "@/lib/hooks";
 
 /**
- * Settings hub — the landing page for everything that configures the farm
- * rather than runs it: geometry (mapping), people (workforce), and agronomy
- * vocabulary (reference data). Each card shows live counts so an admin can
- * see at a glance what's set up and what's still empty.
+ * Settings — the configuration surface, deliberately styled as a settings
+ * page and not a dashboard: a section rail on the left, dense label/value
+ * rows on the right. No KPI tiles, no charts, no hover-lift cards. Numbers
+ * appear only as quiet status text, because here they describe *what is
+ * configured*, not *how the farm is doing*.
  */
+
+const SECTIONS = [
+  { id: "farm", label: "Farm setup" },
+  { id: "people", label: "People & access" },
+  { id: "agronomy", label: "Agronomy reference" },
+  { id: "rules", label: "Detection rules" },
+  { id: "about", label: "About" },
+] as const;
+
 export default function SettingsPage() {
   const greenhouses = useGreenhouses();
   const employees = useEmployees();
@@ -32,115 +39,235 @@ export default function SettingsPage() {
   const pests = usePests();
   const diseases = useDiseases();
   const chemicals = useChemicals();
+  const etlRules = useEtlRules();
 
-  const bedCount = (greenhouses.data ?? []).reduce(
-    (sum, g) => sum + (g.bed_count ?? 0),
-    0,
-  );
-  const scoutCount = (employees.data ?? []).filter(
-    (e) => e.role === "scout",
-  ).length;
+  const [active, setActive] = useState<string>("farm");
 
-  const cards = [
-    {
-      href: "/mapping",
-      icon: PenTool,
-      color: "#059669",
-      title: "Farm Mapping",
-      description:
-        "Draw greenhouse geofence boundaries, register beds, and manage QR codes for check-in verification.",
-      stats: [
-        { label: "Greenhouses", value: greenhouses.data?.length },
-        { label: "Beds", value: greenhouses.data ? bedCount : undefined },
-      ],
-    },
-    {
-      href: "/workforce",
-      icon: Users,
-      color: "#2563eb",
-      title: "Workforce",
-      description:
-        "Manage scouts, supervisors, and admins — devices, PINs, roles, and active status.",
-      stats: [
-        { label: "Employees", value: employees.data?.length },
-        { label: "Scouts", value: employees.data ? scoutCount : undefined },
-      ],
-    },
-    {
-      href: "/reference",
-      icon: FlaskConical,
-      color: "#7c3aed",
-      title: "Reference Data",
-      description:
-        "Varieties, pests, diseases, chemicals, and the economic thresholds that trigger recommendations.",
-      stats: [
-        { label: "Varieties", value: varieties.data?.length },
-        { label: "Pests", value: pests.data?.length },
-        { label: "Diseases", value: diseases.data?.length },
-        { label: "Chemicals", value: chemicals.data?.length },
-      ],
-    },
-  ];
+  const beds = (greenhouses.data ?? []).reduce((s, g) => s + (g.bed_count ?? 0), 0);
+  const scouts = (employees.data ?? []).filter((e) => e.role === "scout").length;
+  const admins = (employees.data ?? []).filter((e) => e.role !== "scout").length;
+
+  const n = (v: number | undefined, unit: string, plural = `${unit}s`) =>
+    v == null ? "—" : `${v} ${v === 1 ? unit : plural}`;
 
   return (
-    <div className="space-y-6 pb-8">
-      <PageHeader
-        title="Settings"
-        subtitle="Configure the farm — geometry, people, and agronomy reference data"
-      />
+    <div className="mx-auto w-full max-w-5xl px-6 pb-12 pt-6">
+      <header className="border-b border-line pb-4">
+        <h1 className="text-xl font-bold tracking-tight text-ink">Settings</h1>
+        <p className="mt-1 text-sm text-ink-faint">
+          Configuration for this farm — geometry, people, agronomy vocabulary and the
+          rules that raise recommendations.
+        </p>
+      </header>
 
-      <div className="grid gap-4 px-6 lg:grid-cols-3">
-        {cards.map(({ href, icon: Icon, color, title, description, stats }) => (
-          <Link
-            key={href}
-            href={href}
-            className="group flex flex-col rounded-xl border border-line bg-white p-5 shadow-card transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg"
+      <div className="flex gap-8 pt-6">
+        {/* Section rail */}
+        <nav className="hidden w-44 shrink-0 lg:block">
+          <ul className="sticky top-4 space-y-0.5">
+            {SECTIONS.map((s) => (
+              <li key={s.id}>
+                <a
+                  href={`#${s.id}`}
+                  onClick={() => setActive(s.id)}
+                  className={`block rounded-md px-3 py-1.5 text-sm transition-colors ${
+                    active === s.id
+                      ? "bg-brand-50 font-semibold text-brand-700"
+                      : "text-ink-faint hover:bg-surface hover:text-ink"
+                  }`}
+                >
+                  {s.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="min-w-0 flex-1 space-y-8">
+          <Section id="farm" title="Farm setup">
+            <Row
+              href="/mapping"
+              label="Greenhouse boundaries"
+              hint="Draw geofences on satellite imagery. Scouts can only submit from inside one."
+              value={n(greenhouses.data?.length, "greenhouse")}
+            />
+            <Row
+              href="/mapping"
+              label="Beds"
+              hint="The pressure index divides by beds scouted, so every bed must be registered."
+              value={greenhouses.data ? n(beds, "bed") : "—"}
+            />
+            <Row
+              href="/mapping"
+              label="QR check-in codes"
+              hint="Fallback verification where GPS is unreliable under polythene."
+              value="Per greenhouse"
+            />
+          </Section>
+
+          <Section id="people" title="People & access">
+            <Row
+              href="/workforce"
+              label="Scouts"
+              hint="Field staff who capture observations in the mobile app."
+              value={employees.data ? n(scouts, "scout") : "—"}
+            />
+            <Row
+              href="/workforce"
+              label="Supervisors & admins"
+              hint="Portal access for reviewing records and approving spray programs."
+              value={employees.data ? n(admins, "account") : "—"}
+            />
+            <Row
+              href="/workforce"
+              label="Device PINs"
+              hint="Each scout signs in on one registered device with a 4-digit PIN."
+              value="Managed per employee"
+            />
+          </Section>
+
+          <Section id="agronomy" title="Agronomy reference">
+            <Row
+              href="/reference"
+              label="Varieties"
+              hint="Crop varieties available when recording an observation."
+              value={n(varieties.data?.length, "variety", "varieties")}
+            />
+            <Row
+              href="/reference"
+              label="Pests"
+              hint="Includes the per-pest severity ETL and pressure-index threshold."
+              value={n(pests.data?.length, "pest")}
+            />
+            <Row
+              href="/reference"
+              label="Diseases"
+              hint="Includes the per-disease severity ETL and pressure-index threshold."
+              value={n(diseases.data?.length, "disease")}
+            />
+            <Row
+              href="/reference"
+              label="Chemical catalogue"
+              hint="Products, prices, WHO class, RAC group, PHI and REI. Importable from FloriSynergy."
+              value={n(chemicals.data?.length, "product")}
+            />
+            <Row
+              href="/reference"
+              label="ETL override rules"
+              hint="Tighter thresholds for a specific variety or greenhouse, with an audit trail."
+              value={n(etlRules.data?.length, "rule")}
+            />
+          </Section>
+
+          <Section
+            id="rules"
+            title="Detection rules"
+            note="These are system-wide and apply to every block. Per-pest values are edited under Reference data."
           >
-            <div className="mb-4 flex items-start justify-between">
-              <div
-                className="flex h-11 w-11 items-center justify-center rounded-xl"
-                style={{ backgroundColor: `${color}14` }}
-              >
-                <Icon size={21} style={{ color }} />
-              </div>
-              <ArrowRight
-                size={18}
-                className="text-ink-faint transition-transform group-hover:translate-x-1 group-hover:text-brand-600"
-              />
-            </div>
-            <h2 className="text-base font-bold text-ink">{title}</h2>
-            <p className="mt-1.5 flex-1 text-sm leading-relaxed text-ink-faint">
-              {description}
-            </p>
-            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-4">
-              {stats.map((s) => (
-                <div key={s.label}>
-                  <p className="text-lg font-bold leading-tight text-ink">
-                    {s.value ?? "—"}
-                  </p>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-ink-faint">
-                    {s.label}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </Link>
-        ))}
-      </div>
+            <Fact
+              label="Pressure index"
+              value="Σ severity ÷ beds scouted"
+              hint="Beds visited with nothing found count as 0, so they dilute the index."
+            />
+            <Fact
+              label="Hotspot severity"
+              value="≥ 4"
+              hint="A single observation at or above this raises an alert regardless of the block index."
+            />
+            <Fact
+              label="Action required when"
+              value="index ≥ ETL  OR  severity ≥ 4"
+              hint="Either condition alone is enough to open a recommendation."
+            />
+            <Fact
+              label="Movement dwell cap"
+              value="45 min"
+              hint="Longer gaps between records are treated as a break, not time spent on a bed."
+            />
+          </Section>
 
-      {/* About strip */}
-      <div className="px-6">
-        <div className="flex items-center gap-4 rounded-xl border border-line bg-white p-5 shadow-card">
-          <LogoMark size={40} />
-          <div className="flex-1">
-            <p className="text-sm font-bold text-ink">FloriSynergy Scouting · v1.0</p>
-            <p className="text-xs text-ink-faint">
-              Geofenced scouting, spraying &amp; agronomy platform. Scouts capture in
-              the mobile app; everything syncs here in real time.
-            </p>
-          </div>
+          <Section id="about" title="About">
+            <div className="flex items-center gap-4 px-4 py-4">
+              <LogoMark size={36} />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-ink">FloriSynergy IPM</p>
+                <p className="text-xs text-ink-faint">
+                  Version 1.0 · Geofenced scouting, spraying and agronomy. Scouts capture
+                  in the mobile app; everything syncs here.
+                </p>
+              </div>
+            </div>
+          </Section>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Section({
+  id,
+  title,
+  note,
+  children,
+}: {
+  id: string;
+  title: string;
+  note?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-4">
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-faint">
+        {title}
+      </h2>
+      <div className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-white">
+        {children}
+      </div>
+      {note && <p className="mt-2 text-xs text-ink-faint">{note}</p>}
+    </section>
+  );
+}
+
+/** A row that navigates somewhere to be changed. */
+function Row({
+  href,
+  label,
+  hint,
+  value,
+}: {
+  href: string;
+  label: string;
+  hint: string;
+  value: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-center gap-4 px-4 py-3 transition-colors hover:bg-surface"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-ink">{label}</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">{hint}</span>
+      </span>
+      <span className="shrink-0 text-xs text-ink-soft">{value}</span>
+      <ChevronRight
+        size={15}
+        className="shrink-0 text-ink-faint transition-transform group-hover:translate-x-0.5"
+      />
+    </Link>
+  );
+}
+
+/** A row that states how the system behaves — nothing to click. */
+function Fact({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="flex items-center gap-4 px-4 py-3">
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-ink">{label}</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">{hint}</span>
+      </span>
+      <span className="shrink-0 rounded border border-line bg-surface px-2 py-1 font-mono text-xs text-ink-soft">
+        {value}
+      </span>
     </div>
   );
 }

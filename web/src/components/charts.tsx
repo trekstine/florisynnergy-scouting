@@ -103,6 +103,81 @@ export function TrendChart({ data, height = 260 }: { data: TrendPoint[]; height?
   );
 }
 
+/**
+ * One line per agent over time — lets a manager line a specific pest or
+ * disease up against the interventions they made, which a single blended
+ * trend line can't show.
+ */
+export function MultiLineChart({
+  data,
+  series,
+  colors,
+  height = 280,
+  yLabel = "Avg severity",
+  yDomain = [0, 5],
+}: {
+  /** Rows keyed by date, with one numeric column per series name. */
+  data: Record<string, string | number | null>[];
+  series: string[];
+  colors: string[];
+  height?: number;
+  yLabel?: string;
+  yDomain?: [number, number];
+}) {
+  if (series.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-line bg-surface px-4 py-8 text-center text-sm text-ink-faint">
+        No data in range.
+      </div>
+    );
+  }
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
+          <XAxis
+            dataKey="date"
+            tickFormatter={shortDate}
+            tick={AXIS}
+            tickLine={false}
+            axisLine={false}
+            minTickGap={24}
+          />
+          <YAxis
+            domain={yDomain}
+            tick={AXIS}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals
+          />
+          <Tooltip
+            contentStyle={tooltipStyle}
+            labelFormatter={(l) => shortDate(String(l))}
+            formatter={(v: number, name) => [v, name]}
+          />
+          <Legend wrapperStyle={LEGEND_STYLE} />
+          {series.map((s, i) => (
+            <Line
+              key={s}
+              type="monotone"
+              dataKey={s}
+              name={s}
+              stroke={colors[i % colors.length]}
+              strokeWidth={2}
+              dot={{ r: 2.5 }}
+              connectNulls
+            />
+          ))}
+        </ComposedChart>
+      </ResponsiveContainer>
+      <p className="mt-1 text-[11px] text-ink-faint">
+        {yLabel} per day · gaps mean the agent wasn&apos;t recorded that day
+      </p>
+    </div>
+  );
+}
+
 /** Horizontal bars for a dimensional breakdown. */
 export function HBarChart({
   data,
@@ -381,29 +456,46 @@ export function CostTrendChart({
  * line on a secondary axis. Good for "which few things account for most
  * of the total" — cost concentration, top offenders, etc.
  */
-export function ParetoChart({
+/**
+ * A plain ranked bar chart: largest first, no cumulative overlay.
+ *
+ * Managers read these to answer "where is the money going", which the bar
+ * heights already say. The Pareto line this replaced added a second axis and
+ * a second scale for a question nobody was asking.
+ */
+export function RankedBarChart({
   data,
   height = 280,
   color = "#7c3aed",
   seriesLabel = "Value",
+  format = "number",
+  unitNote,
 }: {
   data: { label: string; value: number }[];
   height?: number;
   color?: string;
   seriesLabel?: string;
+  /** Money formats the axis and tooltip in KES. */
+  format?: "number" | "money";
+  unitNote?: string;
 }) {
   const sorted = [...data].sort((a, b) => b.value - a.value);
-  const total = sorted.reduce((s, d) => s + d.value, 0);
-  let running = 0;
-  const withCumulative = sorted.map((d) => {
-    running += d.value;
-    return { ...d, cumulativePct: total ? (running / total) * 100 : 0 };
-  });
+  const fmt = (v: number) =>
+    format === "money"
+      ? `KES ${Math.round(v).toLocaleString()}`
+      : v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+  // Long names need room and an angle; short codes read better upright.
+  const longest = sorted.reduce((m, d) => Math.max(m, d.label.length), 0);
+  const angled = longest > 12;
 
   return (
     <div>
       <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={withCumulative} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
+        <BarChart
+          data={sorted}
+          margin={{ top: 8, right: 16, left: 4, bottom: angled ? 46 : 4 }}
+        >
           <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
           <XAxis
             dataKey="label"
@@ -411,44 +503,41 @@ export function ParetoChart({
             tickLine={false}
             axisLine={false}
             interval={0}
-            tickFormatter={(v: string) => (v.length > 10 ? `${v.slice(0, 9)}…` : v)}
+            angle={angled ? -35 : 0}
+            textAnchor={angled ? "end" : "middle"}
+            height={angled ? 60 : 24}
           />
-          <YAxis yAxisId="left" tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
           <YAxis
-            yAxisId="right"
-            orientation="right"
-            domain={[0, 100]}
             tick={AXIS}
             tickLine={false}
             axisLine={false}
-            width={40}
-            tickFormatter={(v: number) => `${v}%`}
+            width={format === "money" ? 64 : 44}
+            tickFormatter={(v: number) =>
+              format === "money" ? `${Math.round(v / 1000)}k` : String(v)
+            }
           />
           <Tooltip
             contentStyle={tooltipStyle}
-            formatter={(v: number, name) =>
-              name === "Cumulative" ? [`${v.toFixed(0)}%`, name] : [v, name]
-            }
+            cursor={{ fill: "#f8fafc" }}
+            formatter={(v: number) => [fmt(v), seriesLabel]}
           />
-          <Bar yAxisId="left" name={seriesLabel} dataKey="value" fill={color} radius={[4, 4, 0, 0]} barSize={22} />
-          <Line yAxisId="right" name="Cumulative" type="monotone" dataKey="cumulativePct" stroke="#0f172a" strokeWidth={2} dot={{ r: 3 }} />
-        </ComposedChart>
+          <Bar
+            name={seriesLabel}
+            dataKey="value"
+            fill={color}
+            radius={[4, 4, 0, 0]}
+            barSize={26}
+          />
+        </BarChart>
       </ResponsiveContainer>
       <ChartKey
-        items={[
-          { label: `${seriesLabel} (left axis)`, color, shape: "bar" },
-          { label: "Cumulative % (right axis)", color: "#0f172a", shape: "line" },
-        ]}
-        note="Ranked largest first — the 80/20 view"
+        items={[{ label: seriesLabel, color, shape: "bar" }]}
+        note={unitNote ?? "Ranked largest first"}
       />
     </div>
   );
 }
 
-/**
- * Stacked bars across a shared set of series keys per period — e.g.
- * applications-by-coverage-type per month.
- */
 export function StackedBarChart({
   data,
   keys,

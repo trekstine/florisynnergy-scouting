@@ -95,3 +95,14 @@ export function money(v: number | null | undefined): string {
     maximumFractionDigits: 0,
   }).format(v);
 }
+
+/**
+ * WHO acute-hazard classes that warrant a warning. Mirrors
+ * `backend/app/services/compliance.py::is_hazardous` — the catalogue writes
+ * these as "Ia", "IA" or "1a" depending on the source, so compare lowercased.
+ */
+const HAZARD_CLASSES = new Set(["ia", "ib", "i", "ii", "1a", "1b"]);
+
+export function isHazardous(whoClass: string | null | undefined): boolean {
+  return !!whoClass && HAZARD_CLASSES.has(whoClass.trim().toLowerCase());
+}

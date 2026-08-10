@@ -3,18 +3,21 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..deps import require_roles
 from ..schemas import (
+    AgentPressure,
+    AgentTrendPoint,
     AnalyticsSummary,
     BedPressure,
     BreakdownRow,
     GreenhousePressure,
     ObservationPoint,
     PestMatrixCell,
+    ScoutMovement,
     ScoutSummary,
     SeverityBucket,
     SprayCostRow,
@@ -85,6 +88,25 @@ async def pressure(db: AsyncSession = Depends(get_db), f: Filters = Depends(_fil
     return await analytics.greenhouse_pressure(db, f)
 
 
+@router.get("/agent-trend", response_model=list[AgentTrendPoint])
+async def agent_trend(
+    db: AsyncSession = Depends(get_db), f: Filters = Depends(_filters), _=Manager
+):
+    """Daily severity per pest and per disease — one series per agent."""
+    return await analytics.agent_trend(db, f)
+
+
+@router.get("/agent-pressure", response_model=list[AgentPressure])
+async def agent_pressure(
+    db: AsyncSession = Depends(get_db),
+    f: Filters = Depends(_filters),
+    greenhouse_id: int | None = Query(default=None),
+    _=Manager,
+):
+    """Per-agent pressure indices — pests and diseases never blended."""
+    return await analytics.agent_pressure(db, f, greenhouse_id)
+
+
 @router.get("/points", response_model=list[ObservationPoint])
 async def points(db: AsyncSession = Depends(get_db), f: Filters = Depends(_filters), _=Manager):
     return await analytics.observation_points(db, f)
@@ -108,6 +130,23 @@ async def pest_matrix(db: AsyncSession = Depends(get_db), f: Filters = Depends(_
 @router.get("/scouts", response_model=list[ScoutSummary])
 async def scouts(db: AsyncSession = Depends(get_db), f: Filters = Depends(_filters), _=Manager):
     return await analytics.scout_summary(db, f)
+
+
+# The path param is deliberately *not* called `scout_id`: the shared _filters
+# dependency already declares one as a query param, and FastAPI refuses to
+# resolve the same name as both a path and a query parameter.
+@router.get("/scouts/{employee_id}/movement", response_model=ScoutMovement)
+async def scout_movement(
+    employee_id: int,
+    db: AsyncSession = Depends(get_db),
+    f: Filters = Depends(_filters),
+    _=Manager,
+):
+    """Bed-by-bed walk for one scout, with dwell time per bed."""
+    try:
+        return await analytics.scout_movement(db, f, employee_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/spray-cost", response_model=list[SprayCostRow])

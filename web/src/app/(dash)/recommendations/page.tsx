@@ -3,10 +3,13 @@
 import { ArrowDownRight, ArrowUpRight, Beaker, CheckCircle2, RotateCcw, ShieldAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { MultiLineChart } from "@/components/charts";
+import { defaultFilters } from "@/components/FilterBar";
 import { SprayProgramBuilder } from "@/components/SprayProgramBuilder";
-import { Badge, PageHeader, Select, Spinner } from "@/components/ui";
+import { Badge, Card, CardHeader, PageHeader, Select, Spinner } from "@/components/ui";
 import { REC_STATUS_HEX, REC_STATUS_LABEL, relativeTime } from "@/lib/format";
 import {
+  useAgentTrend,
   useChemicals,
   useCompliance,
   useGreenhouses,
@@ -39,6 +42,10 @@ const VERDICT: Record<OutcomeVerdict, { label: string; hex: string }> = {
   recovering: { label: "Recovering", hex: "#f59e0b" },
   not_responding: { label: "Not responding", hex: "#dc2626" },
 };
+
+/** Shared with the Analytics trend charts so colours stay consistent. */
+const PEST_LINE_COLORS = ["#10b981", "#0ea5e9", "#6366f1", "#f59e0b", "#ec4899", "#14b8a6"];
+const DISEASE_LINE_COLORS = ["#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#65a30d", "#db2777"];
 
 const SOURCE_LABEL: Record<string, string> = {
   default: "base ETL",
@@ -77,14 +84,93 @@ export default function RecommendationsPage() {
     return m;
   }, [recs.data]);
 
+  /**
+   * Per-agent trajectories alongside the board — the point of an
+   * intervention is that the line comes down afterwards, so the manager
+   * needs both on the same screen.
+   */
+  const trendFilters = useMemo(() => defaultFilters(30), []);
+  const agentTrend = useAgentTrend(trendFilters);
+
+  function pivot(kind: "pest" | "disease") {
+    const points = (agentTrend.data ?? []).filter((p) => p.agent_kind === kind);
+    const totals = new Map<string, number>();
+    for (const p of points) {
+      totals.set(p.agent_name, (totals.get(p.agent_name) ?? 0) + p.records);
+    }
+    const series = [...totals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([n]) => n);
+    const byDate = new Map<string, Record<string, string | number | null>>();
+    for (const p of points) {
+      if (!series.includes(p.agent_name)) continue;
+      const row = byDate.get(p.date) ?? { date: p.date };
+      row[p.agent_name] = p.avg_severity;
+      byDate.set(p.date, row);
+    }
+    return {
+      series,
+      rows: [...byDate.values()].sort((a, b) =>
+        String(a.date).localeCompare(String(b.date)),
+      ),
+    };
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pestTrend = useMemo(() => pivot("pest"), [agentTrend.data]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const diseaseTrend = useMemo(() => pivot("disease"), [agentTrend.data]);
+
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-auto">
       <PageHeader
         title="Recommendations"
         subtitle="Observation → intervention → outcome"
         actions={recs.isFetching ? <Spinner /> : undefined}
       />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-auto p-6 md:grid-cols-2 xl:grid-cols-4">
+
+      {/* Did the intervention work? Read the board against the trend. */}
+      <div className="grid grid-cols-1 gap-4 px-6 pt-5 lg:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="Trend per pest"
+            subtitle="Average severity per day — last 30 days"
+          />
+          <div className="p-4">
+            {agentTrend.isLoading ? (
+              <Spinner />
+            ) : (
+              <MultiLineChart
+                data={pestTrend.rows}
+                series={pestTrend.series}
+                colors={PEST_LINE_COLORS}
+                height={200}
+              />
+            )}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader
+            title="Trend per disease"
+            subtitle="Average severity per day — last 30 days"
+          />
+          <div className="p-4">
+            {agentTrend.isLoading ? (
+              <Spinner />
+            ) : (
+              <MultiLineChart
+                data={diseaseTrend.rows}
+                series={diseaseTrend.series}
+                colors={DISEASE_LINE_COLORS}
+                height={200}
+              />
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-6 md:grid-cols-2 xl:grid-cols-4">
         {COLUMNS.map((col) => (
           <div key={col} className="flex min-h-0 flex-col rounded-xl border border-line bg-surface">
             <div className="flex items-center justify-between border-b border-line px-4 py-3">

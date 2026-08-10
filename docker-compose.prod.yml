@@ -31,6 +31,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
       CORS_ORIGINS: https://${DOMAIN}
       SEED_ON_STARTUP: "${SEED_ON_STARTUP:-true}"
+      FLORI_API_KEY: "${FLORI_API_KEY:-}"
     volumes:
       - media_data:/app/media
     restart: unless-stopped

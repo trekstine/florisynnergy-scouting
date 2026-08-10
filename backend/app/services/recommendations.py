@@ -1,8 +1,15 @@
 """Threshold → recommendation engine.
 
-When a scouting entry's severity meets or exceeds the *effective* ETL (resolved
-through variety/greenhouse override rules), an open intervention recommendation
-is raised — unless one is already open for that greenhouse + agent.
+Two triggers, per the Interplant scouting model — always evaluated per agent,
+never blended across pests/diseases:
+
+* **ETL breach** — the entry's severity meets or exceeds the *effective* ETL
+  (resolved through variety/greenhouse override rules).
+* **Hotspot** — any single observation at/above severity 4 fires immediately,
+  even when the agent's block-wide pressure is otherwise low. A pressure index
+  of 0.2 must not hide a severity-4 bed.
+
+Either way, only one open recommendation per greenhouse + agent.
 """
 from __future__ import annotations
 
@@ -14,23 +21,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import Disease, Pest, Recommendation, ScoutingRecord
 from .etl import effective_threshold
 
+# One observation at/above this severity is an immediate hotspot, regardless
+# of the agent's configured ETL. Mirrors HOTSPOT_SEVERITY in analytics.
+HOTSPOT_SEVERITY = 4
+
 
 async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
-    """Create a recommendation if this entry breaches its effective threshold.
-    Returns True if one was created. Caller owns the commit."""
+    """Create a recommendation if this entry breaches its effective threshold
+    or is a hotspot. Returns True if one was created. Caller owns the commit."""
     if rec.greenhouse_id is None or rec.severity <= 0:
         return False
+
+    is_hotspot = rec.severity >= HOTSPOT_SEVERITY
 
     if rec.scouting_for in ("pest", "lure", "sticky_trap") and rec.pest_id:
         resolved = await effective_threshold(
             db, pest_id=rec.pest_id, variety_id=rec.variety_id, greenhouse_id=rec.greenhouse_id
         )
-        if rec.severity < resolved.threshold:
+        if rec.severity < resolved.threshold and not is_hotspot:
             return False
         if await _open_for(db, rec.greenhouse_id, pest_id=rec.pest_id):
             return False
         pest = await db.get(Pest, rec.pest_id)
+        name = pest.name if pest else "Pest"
         scope = "" if resolved.source == "default" else f" [{resolved.source} ETL]"
+        if is_hotspot and rec.severity < resolved.threshold:
+            where = f" on Bed {rec.bed_code}" if rec.bed_code else ""
+            note = f"Hotspot — {name} severity {rec.severity} detected{where}"
+        else:
+            note = f"{name} {rec.severity} ≥ ETL {resolved.threshold}{scope}"
         db.add(
             Recommendation(
                 greenhouse_id=rec.greenhouse_id,
@@ -39,8 +58,14 @@ async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
                 trigger_severity=rec.severity,
                 baseline_severity=rec.severity,
                 effective_threshold=resolved.threshold,
-                threshold_source=resolved.source,
-                note=f"{pest.name if pest else 'Pest'} {rec.severity} ≥ ETL {resolved.threshold}{scope}",
+                threshold_source="hotspot" if is_hotspot and rec.severity < resolved.threshold else resolved.source,
+                note=note,
+                # Dated to the observation, not to wall-clock. A batch that
+                # syncs days after a scout walked the block must still place
+                # the recommendation on the day the pressure was seen —
+                # otherwise every follow-up scout looks like it predates the
+                # recommendation and the outcome loop never fires.
+                created_at=rec.recorded_at,
             )
         )
         return True
@@ -49,12 +74,18 @@ async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
         resolved = await effective_threshold(
             db, disease_id=rec.disease_id, variety_id=rec.variety_id, greenhouse_id=rec.greenhouse_id
         )
-        if rec.severity < resolved.threshold:
+        if rec.severity < resolved.threshold and not is_hotspot:
             return False
         if await _open_for(db, rec.greenhouse_id, disease_id=rec.disease_id):
             return False
         disease = await db.get(Disease, rec.disease_id)
+        name = disease.name if disease else "Disease"
         scope = "" if resolved.source == "default" else f" [{resolved.source} ETL]"
+        if is_hotspot and rec.severity < resolved.threshold:
+            where = f" on Bed {rec.bed_code}" if rec.bed_code else ""
+            note = f"Hotspot — {name} severity {rec.severity} detected{where}"
+        else:
+            note = f"{name} {rec.severity} ≥ ETL {resolved.threshold}{scope}"
         db.add(
             Recommendation(
                 greenhouse_id=rec.greenhouse_id,
@@ -63,8 +94,14 @@ async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
                 trigger_severity=rec.severity,
                 baseline_severity=rec.severity,
                 effective_threshold=resolved.threshold,
-                threshold_source=resolved.source,
-                note=f"{disease.name if disease else 'Disease'} {rec.severity} ≥ ETL {resolved.threshold}{scope}",
+                threshold_source="hotspot" if is_hotspot and rec.severity < resolved.threshold else resolved.source,
+                note=note,
+                # Dated to the observation, not to wall-clock. A batch that
+                # syncs days after a scout walked the block must still place
+                # the recommendation on the day the pressure was seen —
+                # otherwise every follow-up scout looks like it predates the
+                # recommendation and the outcome loop never fires.
+                created_at=rec.recorded_at,
             )
         )
         return True

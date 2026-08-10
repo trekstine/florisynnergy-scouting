@@ -7,10 +7,11 @@ accountability, and spray cost.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import Select, and_, case, func, select
+from sqlalchemy import Select, and_, case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..geo import centroid, geometry_to_coords
@@ -22,20 +23,30 @@ from ..models import (
     Recommendation,
     ScoutingRecord,
     SprayRecord,
+    Variety,
 )
 from ..schemas import (
+    AgentPressure,
+    AgentTrendPoint,
     AnalyticsSummary,
     BedPressure,
     BreakdownRow,
     GreenhousePressure,
     KpiDelta,
+    MovementDay,
+    MovementStop,
     ObservationPoint,
     PestMatrixCell,
+    ScoutMovement,
     ScoutSummary,
     SeverityBucket,
     SprayCostRow,
     TrendPoint,
 )
+
+# A single observation at/above this severity is an immediate hotspot alert,
+# regardless of how diluted the block-wide pressure index is.
+HOTSPOT_SEVERITY = 4
 
 
 @dataclass
@@ -108,7 +119,7 @@ async def summary(db: AsyncSession, f: Filters) -> AnalyticsSummary:
     prev_start = prev_end - timedelta(days=span - 1)
 
     async def window(s: date, e: date) -> dict[str, float]:
-        wf = Filters(s, e, f.greenhouse_id, f.pest_id, f.scouting_for)
+        wf = Filters(**{**f.__dict__, 'start': s, 'end': e})
         row = (
             await db.execute(
                 wf.apply(
@@ -213,7 +224,7 @@ async def trend(db: AsyncSession, f: Filters) -> list[TrendPoint]:
     day = func.date_trunc("day", ScoutingRecord.recorded_at).label("d")
     rows = (
         await db.execute(
-            Filters(start, end, f.greenhouse_id, f.pest_id, f.scouting_for)
+            Filters(**{**f.__dict__, 'start': start, 'end': end})
             .apply(
                 select(
                     day,
@@ -227,7 +238,7 @@ async def trend(db: AsyncSession, f: Filters) -> list[TrendPoint]:
     ).all()
     over_rows = (
         await db.execute(
-            Filters(start, end, f.greenhouse_id, f.pest_id, f.scouting_for)
+            Filters(**{**f.__dict__, 'start': start, 'end': end})
             .apply(
                 select(day, func.count().label("n"))
                 .select_from(ScoutingRecord)
@@ -257,10 +268,15 @@ async def trend(db: AsyncSession, f: Filters) -> list[TrendPoint]:
 # ───────────────────────────── Breakdown (by dim) ───────────────────────────
 async def breakdown(db: AsyncSession, dim: str, f: Filters, limit: int = 12) -> list[BreakdownRow]:
     over_expr = func.sum(case((ScoutingRecord.severity >= 3, 1), else_=0))
+    # Beds are surfaced on hover so a count leads somewhere actionable.
+    # Nulls and ordering are handled in Python — combining DISTINCT with
+    # ORDER BY and FILTER inside one aggregate is needlessly brittle.
+    beds_expr = func.array_agg(distinct(ScoutingRecord.bed_code))
     base = select(
         func.count().label("records"),
         func.coalesce(func.avg(ScoutingRecord.severity), 0).label("avg"),
         func.coalesce(over_expr, 0).label("over"),
+        beds_expr.label("beds"),
     )
 
     if dim == "pest":
@@ -272,8 +288,16 @@ async def breakdown(db: AsyncSession, dim: str, f: Filters, limit: int = 12) -> 
             Disease, Disease.id == ScoutingRecord.disease_id
         ).group_by(Disease.name)
     elif dim == "variety":
-        q = f.apply(base.add_columns(ScoutingRecord.variety_code.label("k"))).group_by(
-            ScoutingRecord.variety_code
+        # Report the variety's real name, falling back to the code when a
+        # record references a variety that is not in the reference table.
+        q = (
+            f.apply(
+                base.add_columns(
+                    func.coalesce(Variety.name, ScoutingRecord.variety_code).label("k")
+                )
+            )
+            .join(Variety, Variety.code == ScoutingRecord.variety_code, isouter=True)
+            .group_by(func.coalesce(Variety.name, ScoutingRecord.variety_code))
         )
     elif dim == "type":
         q = f.apply(base.add_columns(ScoutingRecord.scouting_for.label("k"))).group_by(
@@ -293,6 +317,7 @@ async def breakdown(db: AsyncSession, dim: str, f: Filters, limit: int = 12) -> 
             records=int(r.records),
             avg_severity=round(float(r.avg), 2),
             over_threshold=int(r.over),
+            beds=sorted(b for b in (r.beds or []) if b),
         )
         for r in rows
     ]
@@ -310,6 +335,111 @@ async def severity_distribution(db: AsyncSession, f: Filters) -> list[SeverityBu
     ).all()
     counts = {int(s): int(c) for s, c in rows}
     return [SeverityBucket(severity=i, count=counts.get(i, 0)) for i in range(6)]
+
+
+# ───────────────────────── Per-agent pressure (Interplant model) ─────────────
+async def agent_pressure(
+    db: AsyncSession, f: Filters, greenhouse_id: int | None = None
+) -> list[AgentPressure]:
+    """Per-greenhouse, per-agent pressure — never blended across agents.
+
+    Pressure Index = Σ(per-bed severity for that agent) ÷ beds scouted, where
+    the denominator is *all* distinct beds visited in the block during the
+    window (any agent), so beds where this agent wasn't seen count as 0.
+    Repeat visits to the same bed use the worst observation, not the sum.
+    """
+    ff = Filters(**{**f.__dict__, "greenhouse_id": greenhouse_id or f.greenhouse_id})
+
+    rows = (
+        await db.execute(
+            ff.apply(
+                select(
+                    ScoutingRecord.greenhouse_id,
+                    ScoutingRecord.pest_id,
+                    ScoutingRecord.disease_id,
+                    ScoutingRecord.bed_code,
+                    ScoutingRecord.severity,
+                ).where(ScoutingRecord.greenhouse_id.is_not(None))
+            )
+        )
+    ).all()
+    if not rows:
+        return []
+
+    # Denominator per block: distinct beds visited by anyone, for anything.
+    beds_scouted: dict[int, set[str]] = defaultdict(set)
+    for r in rows:
+        if r.bed_code:
+            beds_scouted[r.greenhouse_id].add(r.bed_code)
+
+    # Per (block, agent, bed): worst severity in the window.
+    per_bed: dict[tuple[int, str, int], dict[str, int]] = defaultdict(dict)
+    rec_count: dict[tuple[int, str, int], int] = defaultdict(int)
+    for r in rows:
+        if r.pest_id is not None:
+            key = (r.greenhouse_id, "pest", r.pest_id)
+        elif r.disease_id is not None:
+            key = (r.greenhouse_id, "disease", r.disease_id)
+        else:
+            continue
+        rec_count[key] += 1
+        bed = r.bed_code or "—"
+        sev = int(r.severity)
+        if sev > per_bed[key].get(bed, -1):
+            per_bed[key][bed] = sev
+
+    pests = {p.id: p for p in (await db.execute(select(Pest))).scalars().all()}
+    diseases = {d.id: d for d in (await db.execute(select(Disease))).scalars().all()}
+
+    out: list[AgentPressure] = []
+    for (gh_id, kind, agent_id), beds in per_bed.items():
+        ref = pests.get(agent_id) if kind == "pest" else diseases.get(agent_id)
+        name = ref.name if ref else f"#{agent_id}"
+        p_thr = float(ref.pressure_threshold) if ref else 0.5
+
+        denominator = max(len(beds_scouted.get(gh_id, set())), 1)
+        total = sum(beds.values())
+        index = round(total / denominator, 3)
+        worst_bed, max_sev = max(beds.items(), key=lambda kv: kv[1])
+
+        over = index >= p_thr
+        hot = max_sev >= HOTSPOT_SEVERITY
+        out.append(
+            AgentPressure(
+                greenhouse_id=gh_id,
+                agent_kind=kind,  # type: ignore[arg-type]
+                agent_id=agent_id,
+                agent_name=name,
+                records=rec_count[(gh_id, kind, agent_id)],
+                beds_observed=len(beds),
+                beds_scouted=denominator,
+                total_severity=total,
+                pressure_index=index,
+                max_severity=max_sev,
+                hotspot_bed=worst_bed if worst_bed != "—" else None,
+                pressure_threshold=p_thr,
+                over_etl=over,
+                hotspot=hot,
+                action_required=over or hot,
+            )
+        )
+
+    out.sort(key=lambda a: (a.greenhouse_id, -a.pressure_index))
+    return out
+
+
+def _headline(agents: list[AgentPressure]) -> str | None:
+    """One line naming the worst active issue in a block — hotspots first."""
+    actionable = [a for a in agents if a.action_required]
+    if not actionable:
+        return None
+    worst = max(actionable, key=lambda a: (a.hotspot, a.max_severity, a.pressure_index))
+    if worst.hotspot:
+        where = f" on Bed {worst.hotspot_bed}" if worst.hotspot_bed else ""
+        return f"{worst.agent_name} severity {worst.max_severity} detected{where}"
+    return (
+        f"{worst.agent_name} pressure {worst.pressure_index} ≥ ETL {worst.pressure_threshold}"
+    )
 
 
 # ───────────────────────────── Pressure (map) ───────────────────────────────
@@ -330,18 +460,12 @@ async def greenhouse_pressure(db: AsyncSession, f: Filters) -> list[GreenhousePr
     ).all()
     by_gh = {row.greenhouse_id: row for row in agg}
 
-    over_rows = (
-        await db.execute(
-            f.apply(
-                select(ScoutingRecord.greenhouse_id, func.count().label("n"))
-                .select_from(ScoutingRecord)
-                .join(Pest, Pest.id == ScoutingRecord.pest_id, isouter=True)
-                .where(ScoutingRecord.severity >= func.coalesce(Pest.threshold, 3))
-                .group_by(ScoutingRecord.greenhouse_id)
-            )
-        )
-    ).all()
-    over_by_gh = {r.greenhouse_id: r.n for r in over_rows}
+    # Banding is agent-based (the Interplant model): a block is judged by its
+    # worst individual agent, never by a blended cross-agent average.
+    agents = await agent_pressure(db, f)
+    agents_by_gh: dict[int, list[AgentPressure]] = defaultdict(list)
+    for a in agents:
+        agents_by_gh[a.greenhouse_id].append(a)
 
     out: list[GreenhousePressure] = []
     for gh in greenhouses:
@@ -350,7 +474,18 @@ async def greenhouse_pressure(db: AsyncSession, f: Filters) -> list[GreenhousePr
         records = int(row.records) if row else 0
         max_sev = int(row.max_sev) if row else 0
         avg_sev = round(float(row.avg_sev), 2) if row else 0.0
-        over = int(over_by_gh.get(gh.id, 0))
+
+        gh_agents = agents_by_gh.get(gh.id, [])
+        action = [a for a in gh_agents if a.action_required]
+        if records == 0:
+            band = "none"
+        elif action:
+            band = "high"
+        elif any(a.max_severity >= 3 or a.pressure_index >= 0.6 * a.pressure_threshold for a in gh_agents):
+            band = "medium"
+        else:
+            band = "low"
+
         out.append(
             GreenhousePressure(
                 greenhouse_id=gh.id,
@@ -360,8 +495,9 @@ async def greenhouse_pressure(db: AsyncSession, f: Filters) -> list[GreenhousePr
                 records=records,
                 max_severity=max_sev,
                 avg_severity=avg_sev,
-                over_threshold=over,
-                pressure=_band(max_sev, over),
+                over_threshold=len(action),
+                pressure=band,  # type: ignore[arg-type]
+                headline=_headline(gh_agents),
             )
         )
     return out
@@ -398,7 +534,9 @@ async def observation_points(db: AsyncSession, f: Filters, limit: int = 8000) ->
 
 
 async def bed_pressure(db: AsyncSession, greenhouse_id: int, f: Filters) -> list[BedPressure]:
-    gf = Filters(f.start, f.end, greenhouse_id, f.pest_id, f.scouting_for)
+    # Keyword construction — Filters gained fields in the middle, and a
+    # positional call here once shifted scouting_for into disease_id.
+    gf = Filters(**{**f.__dict__, "greenhouse_id": greenhouse_id})
     rows = (
         await db.execute(
             gf.apply(
@@ -433,31 +571,89 @@ async def bed_pressure(db: AsyncSession, greenhouse_id: int, f: Filters) -> list
 
 # ───────────────────────────── Pest matrix ──────────────────────────────────
 async def pest_matrix(db: AsyncSession, f: Filters) -> list[PestMatrixCell]:
-    rows = (
-        await db.execute(
-            f.apply(
-                select(
-                    Pest.name.label("pest"),
-                    Greenhouse.name.label("gh"),
-                    func.count().label("records"),
-                    func.avg(ScoutingRecord.severity).label("avg_sev"),
-                )
-                .select_from(ScoutingRecord)
-                .join(Pest, Pest.id == ScoutingRecord.pest_id)
-                .join(Greenhouse, Greenhouse.id == ScoutingRecord.greenhouse_id)
-                .group_by(Pest.name, Greenhouse.name)
-            ).order_by(Pest.name, Greenhouse.name)
-        )
-    ).all()
-    return [
-        PestMatrixCell(
-            pest=r.pest,
-            greenhouse=r.gh,
-            records=int(r.records),
-            avg_severity=round(float(r.avg_sev or 0), 2),
-        )
-        for r in rows
-    ]
+    """Pest **and disease** pressure per greenhouse.
+
+    Both agent types share the grid — a manager scanning a block wants to see
+    Powdery Mildew next to Thrips, not on a separate screen.
+    """
+    out: list[PestMatrixCell] = []
+
+    for kind, model, fk in (
+        ("pest", Pest, ScoutingRecord.pest_id),
+        ("disease", Disease, ScoutingRecord.disease_id),
+    ):
+        rows = (
+            await db.execute(
+                f.apply(
+                    select(
+                        model.name.label("agent"),
+                        Greenhouse.name.label("gh"),
+                        func.count().label("records"),
+                        func.avg(ScoutingRecord.severity).label("avg_sev"),
+                    )
+                    .select_from(ScoutingRecord)
+                    .join(model, model.id == fk)
+                    .join(Greenhouse, Greenhouse.id == ScoutingRecord.greenhouse_id)
+                    .group_by(model.name, Greenhouse.name)
+                ).order_by(model.name, Greenhouse.name)
+            )
+        ).all()
+        out += [
+            PestMatrixCell(
+                pest=r.agent,
+                kind=kind,  # type: ignore[arg-type]
+                greenhouse=r.gh,
+                records=int(r.records),
+                avg_severity=round(float(r.avg_sev or 0), 2),
+            )
+            for r in rows
+        ]
+
+    return out
+
+
+async def agent_trend(db: AsyncSession, f: Filters) -> list[AgentTrendPoint]:
+    """Daily severity per pest and per disease — one series per agent.
+
+    Lets a manager line an agent's trajectory up against the interventions
+    they made, which a single blended trend line can't show.
+    """
+    out: list[AgentTrendPoint] = []
+    day = func.date(ScoutingRecord.recorded_at)
+
+    for kind, model, fk in (
+        ("pest", Pest, ScoutingRecord.pest_id),
+        ("disease", Disease, ScoutingRecord.disease_id),
+    ):
+        rows = (
+            await db.execute(
+                f.apply(
+                    select(
+                        day.label("d"),
+                        model.name.label("agent"),
+                        func.count().label("records"),
+                        func.coalesce(func.avg(ScoutingRecord.severity), 0).label("avg"),
+                        func.coalesce(func.max(ScoutingRecord.severity), 0).label("mx"),
+                    )
+                    .select_from(ScoutingRecord)
+                    .join(model, model.id == fk)
+                    .group_by(day, model.name)
+                ).order_by(day)
+            )
+        ).all()
+        out += [
+            AgentTrendPoint(
+                date=r.d,
+                agent_kind=kind,  # type: ignore[arg-type]
+                agent_name=r.agent,
+                records=int(r.records),
+                avg_severity=round(float(r.avg), 2),
+                max_severity=int(r.mx),
+            )
+            for r in rows
+        ]
+
+    return out
 
 
 # ───────────────────────────── Scouts ───────────────────────────────────────
@@ -468,6 +664,7 @@ async def scout_summary(db: AsyncSession, f: Filters) -> list[ScoutSummary]:
             Employee.name,
             func.count(ScoutingRecord.id).label("records"),
             func.count(func.distinct(ScoutingRecord.greenhouse_id)).label("ghs"),
+            func.count(func.distinct(ScoutingRecord.bed_code)).label("beds"),
             func.max(ScoutingRecord.recorded_at).label("last_seen"),
         )
         .select_from(Employee)
@@ -490,6 +687,7 @@ async def scout_summary(db: AsyncSession, f: Filters) -> list[ScoutSummary]:
                 Employee.name,
                 func.count(ScoutingRecord.id).label("records"),
                 func.count(func.distinct(ScoutingRecord.greenhouse_id)).label("ghs"),
+                func.count(func.distinct(ScoutingRecord.bed_code)).label("beds"),
                 func.max(ScoutingRecord.recorded_at).label("last_seen"),
             )
             .select_from(Employee)
@@ -509,10 +707,135 @@ async def scout_summary(db: AsyncSession, f: Filters) -> list[ScoutSummary]:
             name=r.name,
             records=int(r.records),
             greenhouses_visited=int(r.ghs),
+            beds_visited=int(r.beds or 0),
             last_seen=r.last_seen,
         )
         for r in rows
     ]
+
+
+# ─────────────────────────── Movement detail ────────────────────────────────
+# A scout who lingers is thorough; one who clears a block in four minutes is
+# not scouting it. Neither shows up in a record count, so we reconstruct the
+# walk from the timestamps.
+
+# Gap beyond which we assume they stopped scouting (lunch, end of shift)
+# rather than spending three hours on one bed.
+MAX_DWELL_MIN = 45.0
+
+
+async def scout_movement(db: AsyncSession, f: Filters, scout_id: int) -> ScoutMovement:
+    """Reconstruct one scout's walk: which beds, in what order, for how long."""
+    emp = (await db.execute(select(Employee).where(Employee.id == scout_id))).scalar_one_or_none()
+    if emp is None:
+        raise ValueError("Scout not found")
+
+    q = (
+        Filters(**{**f.__dict__, "scout_id": scout_id})
+        .apply(
+            select(
+                ScoutingRecord.recorded_at,
+                ScoutingRecord.greenhouse_id,
+                ScoutingRecord.bed_code,
+                ScoutingRecord.severity,
+                Greenhouse.name.label("gh"),
+                Pest.name.label("pest"),
+                Disease.name.label("disease"),
+            )
+            .select_from(ScoutingRecord)
+            .join(Greenhouse, Greenhouse.id == ScoutingRecord.greenhouse_id, isouter=True)
+            .join(Pest, Pest.id == ScoutingRecord.pest_id, isouter=True)
+            .join(Disease, Disease.id == ScoutingRecord.disease_id, isouter=True)
+        )
+        .order_by(ScoutingRecord.recorded_at.asc())
+    )
+    rows = (await db.execute(q)).all()
+
+    by_day: dict[date, list] = defaultdict(list)
+    for r in rows:
+        by_day[r.recorded_at.date()].append(r)
+
+    days: list[MovementDay] = []
+    all_dwells: list[float] = []
+    total_beds = 0
+    total_minutes = 0.0
+
+    for d in sorted(by_day, reverse=True):
+        recs = by_day[d]
+
+        # Collapse consecutive records at the same bed into one stop.
+        groups: list[list] = []
+        for r in recs:
+            key = (r.greenhouse_id, r.bed_code)
+            if groups and (groups[-1][0].greenhouse_id, groups[-1][0].bed_code) == key:
+                groups[-1].append(r)
+            else:
+                groups.append([r])
+
+        stops: list[MovementStop] = []
+        for i, g in enumerate(groups):
+            started = g[0].recorded_at
+            # They left when the next stop's first record was logged. The last
+            # stop of the day has no such marker, so fall back to its own span
+            # (which is 0 for a single record — honestly unknown, not zero).
+            if i + 1 < len(groups):
+                ended = groups[i + 1][0].recorded_at
+            else:
+                ended = g[-1].recorded_at
+            raw = (ended - started).total_seconds() / 60
+            minutes = round(min(raw, MAX_DWELL_MIN), 1) if raw > 0 else None
+            if minutes is not None:
+                all_dwells.append(minutes)
+                total_minutes += minutes
+            agents = sorted({a for r in g for a in (r.pest, r.disease) if a})
+            stops.append(
+                MovementStop(
+                    started_at=started,
+                    ended_at=ended,
+                    minutes=minutes,
+                    greenhouse_id=g[0].greenhouse_id,
+                    greenhouse=g[0].gh or "—",
+                    bed_code=g[0].bed_code,
+                    records=len(g),
+                    max_severity=max((r.severity or 0) for r in g),
+                    agents=agents,
+                )
+            )
+
+        beds = len({(s.greenhouse_id, s.bed_code) for s in stops if s.bed_code})
+        total_beds += beds
+        seen_gh: list[str] = []
+        for s in stops:
+            if not seen_gh or seen_gh[-1] != s.greenhouse:
+                seen_gh.append(s.greenhouse)
+        days.append(
+            MovementDay(
+                date=d,
+                records=len(recs),
+                beds=beds,
+                greenhouses=seen_gh,
+                first_seen=recs[0].recorded_at,
+                last_seen=recs[-1].recorded_at,
+                active_minutes=round(sum(s.minutes or 0 for s in stops), 1),
+                stops=stops,
+            )
+        )
+
+    median = None
+    if all_dwells:
+        srt = sorted(all_dwells)
+        mid = len(srt) // 2
+        median = srt[mid] if len(srt) % 2 else round((srt[mid - 1] + srt[mid]) / 2, 1)
+
+    return ScoutMovement(
+        scout_id=emp.id,
+        name=emp.name,
+        days=days,
+        total_records=len(rows),
+        total_beds=total_beds,
+        active_minutes=round(total_minutes, 1),
+        median_minutes_per_bed=median,
+    )
 
 
 # ───────────────────────────── Spray cost ───────────────────────────────────

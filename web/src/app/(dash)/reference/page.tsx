@@ -1,9 +1,9 @@
 "use client";
 
-import { History, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, History, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { Badge, Button, Card, ErrorBox, Field, PageHeader, Select, Spinner, TextInput } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, ErrorBox, Field, PageHeader, Select, Spinner, TextInput } from "@/components/ui";
 import { money, relativeTime } from "@/lib/format";
 import {
   useChemicals,
@@ -15,6 +15,7 @@ import {
   useEtlAudit,
   useEtlRules,
   useGreenhouses,
+  useImportChemicals,
   usePests,
   useUpdateRef,
   useVarieties,
@@ -63,6 +64,9 @@ export default function ReferencePage() {
 }
 
 const THRESHOLDS = [1, 2, 3, 4, 5];
+/** Block-wide pressure ETLs. Low values are normal — a single severity-2 bed
+ *  in a 20-bed block is only 0.10, so realistic ETLs sit well under 1. */
+const PRESSURE_ETLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1, 1.5, 2];
 
 function Varieties() {
   const q = useVarieties();
@@ -139,19 +143,48 @@ function Pests() {
               <span className="text-sm font-medium text-ink">{p.name}</span>
               {p.category && <span className="ml-2 text-xs text-ink-faint">{p.category}</span>}
             </div>
-            <label className="flex items-center gap-2 text-xs text-ink-faint">
-              base ETL
-              <Select
-                className="w-16"
-                value={p.threshold}
-                onChange={(e) => update.mutate({ id: p.id, body: { threshold: Number(e.target.value) } })}
-              >
-                {THRESHOLDS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </Select>
-            </label>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-ink-faint">
+                base ETL
+                <Select
+                  className="w-16"
+                  title="Severity at/above which a single observation raises a recommendation"
+                  value={p.threshold}
+                  onChange={(e) => update.mutate({ id: p.id, body: { threshold: Number(e.target.value) } })}
+                >
+                  {THRESHOLDS.map((n) => <option key={n} value={n}>{n}</option>)}
+                </Select>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-ink-faint">
+                pressure ETL
+                <Select
+                  className="w-20"
+                  title="Block-wide index (Σ severity ÷ beds scouted) at/above which action is required"
+                  value={p.pressure_threshold}
+                  onChange={(e) =>
+                    update.mutate({
+                      id: p.id,
+                      body: { pressure_threshold: Number(e.target.value) },
+                    })
+                  }
+                >
+                  {PRESSURE_ETLS.map((n) => (
+                    <option key={n} value={n}>
+                      {n.toFixed(2)}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            </div>
           </li>
         ))}
       </ul>
+      <p className="border-t border-line px-5 py-2.5 text-xs text-ink-faint">
+        <span className="font-semibold text-ink-soft">Base ETL</span> fires on a
+        single observation.{" "}
+        <span className="font-semibold text-ink-soft">Pressure ETL</span> fires on
+        the block-wide index. Any severity ≥ 4 always fires as a hotspot.
+      </p>
     </Card>
   );
 }
@@ -189,19 +222,48 @@ function Diseases() {
         {(q.data ?? []).map((d) => (
           <li key={d.id} className="flex items-center justify-between px-5 py-3">
             <span className="text-sm font-medium text-ink">{d.name}</span>
-            <label className="flex items-center gap-2 text-xs text-ink-faint">
-              base ETL
-              <Select
-                className="w-16"
-                value={d.threshold}
-                onChange={(e) => update.mutate({ id: d.id, body: { threshold: Number(e.target.value) } })}
-              >
-                {THRESHOLDS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </Select>
-            </label>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-ink-faint">
+                base ETL
+                <Select
+                  className="w-16"
+                  title="Severity at/above which a single observation raises a recommendation"
+                  value={d.threshold}
+                  onChange={(e) => update.mutate({ id: d.id, body: { threshold: Number(e.target.value) } })}
+                >
+                  {THRESHOLDS.map((n) => <option key={n} value={n}>{n}</option>)}
+                </Select>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-ink-faint">
+                pressure ETL
+                <Select
+                  className="w-20"
+                  title="Block-wide index (Σ severity ÷ beds scouted) at/above which action is required"
+                  value={d.pressure_threshold}
+                  onChange={(e) =>
+                    update.mutate({
+                      id: d.id,
+                      body: { pressure_threshold: Number(e.target.value) },
+                    })
+                  }
+                >
+                  {PRESSURE_ETLS.map((n) => (
+                    <option key={n} value={n}>
+                      {n.toFixed(2)}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            </div>
           </li>
         ))}
       </ul>
+      <p className="border-t border-line px-5 py-2.5 text-xs text-ink-faint">
+        <span className="font-semibold text-ink-soft">Base ETL</span> fires on a
+        single observation.{" "}
+        <span className="font-semibold text-ink-soft">Pressure ETL</span> fires on
+        the block-wide index. Any severity ≥ 4 always fires as a hotspot.
+      </p>
     </Card>
   );
 }
@@ -397,8 +459,67 @@ function EtlHistory() {
 
 function Chemicals() {
   const q = useChemicals();
+  const importCh = useImportChemicals();
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  /** Dosing gaps block the spray builder from pricing a product. */
+  const incomplete = (q.data ?? []).filter(
+    (c) => c.rate_per_ha == null || c.phi_days == null,
+  );
+
+  async function runImport() {
+    setMsg(null);
+    setErr(null);
+    try {
+      const r = await importCh.mutateAsync();
+      setMsg(
+        `Fetched ${r.fetched} · ${r.created} added, ${r.updated} updated` +
+          (r.skipped ? `, ${r.skipped} skipped` : "") +
+          (r.needs_agronomy.length
+            ? ` · ${r.needs_agronomy.length} need rate/ha and PHI before they can be used in a spray program.`
+            : ""),
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Import failed.");
+    }
+  }
+
   return (
     <Card>
+      <CardHeader
+        title={`Chemicals (${q.data?.length ?? 0})`}
+        subtitle="Master list synced from the legacy FloriSynergy API, with real buying prices."
+        actions={
+          <Button variant="outline" onClick={runImport} disabled={importCh.isPending}>
+            <Download className="h-4 w-4" />
+            {importCh.isPending ? "Importing…" : "Import from FloriSynergy"}
+          </Button>
+        }
+      />
+
+      {(msg || err) && (
+        <div className="border-b border-line px-5 py-3">
+          {err ? (
+            <ErrorBox message={err} />
+          ) : (
+            <p className="text-sm text-brand-700">{msg}</p>
+          )}
+        </div>
+      )}
+
+      {incomplete.length > 0 && (
+        <div className="flex items-start gap-2.5 border-b border-line bg-amber-50 px-5 py-3">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-700" />
+          <p className="text-sm text-amber-800">
+            <span className="font-semibold">{incomplete.length}</span> chemical
+            {incomplete.length === 1 ? "" : "s"} lack rate/ha or PHI. The legacy
+            list doesn&apos;t carry those, and the spray builder can&apos;t
+            calculate quantity, cost or safe-harvest date without them.
+          </p>
+        </div>
+      )}
+
       <div className="overflow-auto">
         <table className="w-full text-sm">
           <thead>
@@ -408,21 +529,42 @@ function Chemicals() {
               <th className="px-3 py-2.5 font-semibold">Target</th>
               <th className="px-3 py-2.5 font-semibold">WHO</th>
               <th className="px-3 py-2.5 font-semibold">RAC</th>
-              <th className="px-3 py-2.5 font-semibold">Price</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Rate/ha</th>
+              <th className="px-3 py-2.5 text-right font-semibold">PHI</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Price</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {(q.data ?? []).map((c) => (
-              <tr key={c.id} className="hover:bg-surface">
-                <td className="px-5 py-2.5 font-medium">{c.name}</td>
-                <td className="px-3 py-2.5">{c.active_ingredient1 ?? "—"}</td>
-                <td className="px-3 py-2.5">{c.target1 ?? "—"}</td>
-                <td className="px-3 py-2.5">{c.who_class ? <Badge>{c.who_class}</Badge> : "—"}</td>
-                <td className="px-3 py-2.5">{c.rac_code ?? "—"}</td>
-                <td className="px-3 py-2.5 tabular-nums">{money(c.buying_price)}</td>
-              </tr>
-            ))}
-            {q.data?.length === 0 && <tr><td colSpan={6} className="px-5 py-8 text-center text-ink-faint">No chemicals.</td></tr>}
+            {(q.data ?? []).map((c) => {
+              const gap = c.rate_per_ha == null || c.phi_days == null;
+              return (
+                <tr key={c.id} className="hover:bg-surface">
+                  <td className="px-5 py-2.5 font-medium">
+                    {c.name}
+                    {gap && (
+                      <span
+                        className="ml-1.5 text-amber-600"
+                        title="Missing dosing data — cannot be priced in a spray program"
+                      >
+                        ⚠
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">{c.active_ingredient1 ?? "—"}</td>
+                  <td className="px-3 py-2.5">{c.target1 ?? "—"}</td>
+                  <td className="px-3 py-2.5">{c.who_class ? <Badge>{c.who_class}</Badge> : "—"}</td>
+                  <td className="px-3 py-2.5">{c.rac_code ?? "—"}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
+                    {c.rate_per_ha ?? "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
+                    {c.phi_days != null ? `${c.phi_days}d` : "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{money(c.buying_price)}</td>
+                </tr>
+              );
+            })}
+            {q.data?.length === 0 && <tr><td colSpan={8} className="px-5 py-8 text-center text-ink-faint">No chemicals yet — use &ldquo;Import from FloriSynergy&rdquo; above.</td></tr>}
           </tbody>
         </table>
       </div>

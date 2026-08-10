@@ -21,6 +21,10 @@ class Settings(BaseSettings):
         "http://localhost:5173",
     ]
     seed_on_startup: bool = True
+    # Legacy FloriSynergy API — source of the master chemical list (with real
+    # buying prices). Set FLORI_API_KEY in .env; never commit the key.
+    flori_api_url: str = "https://ipr.thinksynergyltd.com/api1/rest/getchemicals.php"
+    flori_api_key: str | None = None
 
     @field_validator("cors_origins", mode="before")
     @classmethod

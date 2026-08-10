@@ -131,6 +131,11 @@ async def submit_batch(
             verification_method=e.verification_method,
             recorded_at=e.recorded_at,
         )
+        # Data quality: flag likely fat-finger entries against this block's
+        # own history, before they reach the trends. Runs pre-insert so the
+        # record isn't compared against itself.
+        record.flagged, record.flag_reason = await anomaly_check(db, record)
+
         try:
             async with db.begin_nested():
                 db.add(record)

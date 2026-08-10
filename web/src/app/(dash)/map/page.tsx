@@ -10,7 +10,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
-import { HBarChart, TrendChart } from "@/components/charts";
+import { TrendChart } from "@/components/charts";
 import { FilterBar, defaultFilters } from "@/components/FilterBar";
 import { PressureMap } from "@/components/map";
 import { Badge, Spinner } from "@/components/ui";
@@ -22,8 +22,8 @@ import {
   severityHex,
 } from "@/lib/format";
 import {
+  useAgentPressure,
   useBedPressure,
-  useBreakdown,
   useDiseases,
   usePests,
   usePoints,
@@ -172,8 +172,7 @@ function GreenhousePanel({
   const ghFilters = { ...filters, greenhouse_id: gh.greenhouse_id };
   const beds = useBedPressure(gh.greenhouse_id, filters);
   const trend = useTrend(ghFilters);
-  const pests = useBreakdown("pest", ghFilters);
-  const diseases = useBreakdown("disease", ghFilters);
+  const agents = useAgentPressure(gh.greenhouse_id, filters);
   const scouting = useScouting({
     greenhouse_id: gh.greenhouse_id,
     start: filters.start,
@@ -226,6 +225,15 @@ function GreenhousePanel({
                 {bedRows.length} bed{bedRows.length === 1 ? "" : "s"} active
               </span>
             </div>
+            {/* Names the specific agent driving the band, per the IPM spec. */}
+            {gh.headline && (
+              <p
+                className="mt-1.5 text-xs font-semibold"
+                style={{ color: PRESSURE_HEX[gh.pressure] }}
+              >
+                {gh.headline}
+              </p>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -291,28 +299,83 @@ function GreenhousePanel({
               {trend.isLoading ? <Spinner /> : <TrendChart data={trend.data ?? []} height={190} />}
             </Section>
 
-            <Section title="Top pests here" hint="Records per pest">
-              {pests.isLoading ? <Spinner /> : (pests.data ?? []).length === 0 ? (
-                <p className="text-sm text-ink-faint">No pest records.</p>
+            {/* Per-agent pressure — pests and diseases are never blended into
+                one block score, since they behave and are treated differently. */}
+            <Section
+              title="Pressure by pest / disease"
+              hint="Index = Σ severity ÷ beds scouted"
+            >
+              {agents.isLoading ? (
+                <Spinner />
+              ) : (agents.data ?? []).length === 0 ? (
+                <p className="text-sm text-ink-faint">No pest or disease records.</p>
               ) : (
-                <HBarChart
-                  data={(pests.data ?? []).slice(0, 5).map((r) => ({ label: r.key, value: r.records }))}
-                  height={150}
-                  seriesLabel="Records"
-                />
-              )}
-            </Section>
-
-            <Section title="Top diseases here" hint="Records per disease">
-              {diseases.isLoading ? <Spinner /> : (diseases.data ?? []).length === 0 ? (
-                <p className="text-sm text-ink-faint">No disease records.</p>
-              ) : (
-                <HBarChart
-                  data={(diseases.data ?? []).slice(0, 5).map((r) => ({ label: r.key, value: r.records }))}
-                  height={150}
-                  color="#f59e0b"
-                  seriesLabel="Records"
-                />
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-faint">
+                        <th className="pb-2 font-semibold">Pest / Disease</th>
+                        <th className="pb-2 text-right font-semibold">Index</th>
+                        <th className="pb-2 text-right font-semibold">Max</th>
+                        <th className="pb-2 font-semibold">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {(agents.data ?? []).map((a) => (
+                        <tr key={`${a.agent_kind}-${a.agent_id}`}>
+                          <td className="py-2 pr-2">
+                            <p className="font-medium text-ink">{a.agent_name}</p>
+                            <p className="text-[11px] text-ink-faint">
+                              {a.beds_observed}/{a.beds_scouted} beds · ETL{" "}
+                              {a.pressure_threshold}
+                            </p>
+                          </td>
+                          <td className="py-2 text-right">
+                            <span
+                              className={
+                                "font-bold tabular-nums " +
+                                (a.over_etl ? "text-red-600" : "text-ink")
+                              }
+                            >
+                              {a.pressure_index.toFixed(2)}
+                            </span>
+                          </td>
+                          <td className="py-2 text-right">
+                            <span
+                              className="inline-block min-w-[1.75rem] rounded px-1.5 py-0.5 text-xs font-bold tabular-nums"
+                              style={{
+                                backgroundColor: `${severityHex(a.max_severity)}33`,
+                                color: a.max_severity >= 3 ? "#b91c1c" : "#047857",
+                              }}
+                            >
+                              {a.max_severity}
+                            </span>
+                            {a.hotspot_bed && (
+                              <p className="mt-0.5 text-[11px] text-ink-faint">
+                                Bed {a.hotspot_bed}
+                              </p>
+                            )}
+                          </td>
+                          <td className="py-2 pl-2">
+                            <div className="flex flex-wrap gap-1">
+                              {a.hotspot && <Badge color="#dc2626">Hotspot</Badge>}
+                              {a.over_etl && <Badge color="#ea580c">Over ETL</Badge>}
+                              {!a.action_required && (
+                                <span className="text-[11px] text-ink-faint">
+                                  Monitor
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-2.5 border-t border-line pt-2 text-[11px] leading-relaxed text-ink-faint">
+                    Action required when index ≥ ETL <em>or</em> any single severity
+                    ≥ 4. Beds with no observation count as 0 for that agent.
+                  </p>
+                </div>
               )}
             </Section>
           </>

@@ -10,6 +10,7 @@ from ..deps import get_current_employee, require_roles
 from ..geo import coords_to_geometry, geometry_to_coords
 from ..models import Bed, Farm, Greenhouse
 from ..schemas import (
+    BedBulkCreate,
     BedCreate,
     BedOut,
     FarmCreate,
@@ -200,3 +201,67 @@ async def create_bed(
         raise HTTPException(status.HTTP_409_CONFLICT, "Bed code must be unique per greenhouse")
     await db.refresh(bed)
     return _bed_out(bed)
+
+
+@gh_router.post(
+    "/{greenhouse_id}/beds/bulk",
+    response_model=list[BedOut],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_beds_bulk(
+    greenhouse_id: int,
+    payload: BedBulkCreate,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_roles("admin", "supervisor")),
+):
+    """Generate a numbered run of beds, e.g. "Bed 1" … "Bed 20".
+
+    Registering every bed matters beyond bookkeeping: the pest pressure index
+    divides by the block's bed count, so a partially-registered block skews
+    every index computed against it.
+    """
+    gh = await db.get(Greenhouse, greenhouse_id)
+    if gh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Greenhouse not found")
+
+    existing = set(
+        (
+            await db.execute(select(Bed.code).where(Bed.greenhouse_id == greenhouse_id))
+        ).scalars().all()
+    )
+
+    created: list[Bed] = []
+    for n in range(payload.start, payload.start + payload.count):
+        code = f"{payload.prefix}{n}".strip()
+        if code in existing:
+            continue  # idempotent — topping a block up from 12 to 20 is safe
+        bed = Bed(greenhouse_id=greenhouse_id, code=code)
+        db.add(bed)
+        created.append(bed)
+
+    if not created:
+        return []
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Could not create those beds")
+    for b in created:
+        await db.refresh(b)
+    return [_bed_out(b) for b in created]
+
+
+@gh_router.delete(
+    "/{greenhouse_id}/beds/{bed_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_bed(
+    greenhouse_id: int,
+    bed_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_roles("admin", "supervisor")),
+):
+    bed = await db.get(Bed, bed_id)
+    if bed is None or bed.greenhouse_id != greenhouse_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bed not found")
+    await db.delete(bed)
+    await db.commit()

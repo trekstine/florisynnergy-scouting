@@ -56,7 +56,13 @@ export function Topbar({ user }: { user: SessionUser | null }) {
         <div className="flex items-center gap-1.5 text-sm">
           {inSettings && (
             <>
-              <span className="font-medium text-ink-faint">Settings</span>
+              {/* The crumb has to be clickable — it was the only way back. */}
+              <Link
+                href="/settings"
+                className="font-medium text-ink-faint transition-colors hover:text-brand-700 hover:underline"
+              >
+                Settings
+              </Link>
               <ChevronRight size={14} className="text-ink-faint" />
             </>
           )}

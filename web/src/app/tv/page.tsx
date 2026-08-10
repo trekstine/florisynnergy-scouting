@@ -147,7 +147,8 @@ export default function TvPage() {
           <LogoMark size={46} />
           <div>
             <p className="text-2xl font-bold leading-tight">
-              Flori<span className="text-brand-400">Synergy</span>
+              Flori<span className="text-brand-400">Synergy</span>{" "}
+              <span className="text-white/50">IPM</span>
             </p>
             <p className="flex items-center gap-1.5 text-sm text-white/45">
               <MapPin size={13} /> Naivasha Rose Estate

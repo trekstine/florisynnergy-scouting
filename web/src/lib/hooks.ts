@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, V1 } from "./client-api";
 import type {
+  AgentPressure,
+  AgentTrendPoint,
   AnalyticsSummary,
   Bed,
   BedPressure,
@@ -22,6 +24,7 @@ import type {
   Recommendation,
   RecommendationOutcome,
   ScoutingRecord,
+  ScoutMovement,
   ScoutSummary,
   SeverityBucket,
   SprayCostRow,
@@ -97,7 +100,54 @@ export function useCreateBed() {
   return useMutation({
     mutationFn: ({ greenhouseId, code }: { greenhouseId: number; code: string }) =>
       api.post<Bed>(`${V1}/greenhouses/${greenhouseId}/beds`, { code }),
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["beds", v.greenhouseId] }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["beds", v.greenhouseId] });
+      // bed_count lives on the greenhouse row, and the pressure index divides
+      // by it — both must refresh when beds change.
+      qc.invalidateQueries({ queryKey: ["greenhouses"] });
+      qc.invalidateQueries({ queryKey: ["agent-pressure"] });
+    },
+  });
+}
+
+/** Generate "Bed 1" … "Bed N" in one call — blocks run to 20+ beds. */
+export function useCreateBedsBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      greenhouseId,
+      count,
+      start = 1,
+      prefix = "Bed ",
+    }: {
+      greenhouseId: number;
+      count: number;
+      start?: number;
+      prefix?: string;
+    }) =>
+      api.post<Bed[]>(`${V1}/greenhouses/${greenhouseId}/beds/bulk`, {
+        count,
+        start,
+        prefix,
+      }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["beds", v.greenhouseId] });
+      qc.invalidateQueries({ queryKey: ["greenhouses"] });
+      qc.invalidateQueries({ queryKey: ["agent-pressure"] });
+    },
+  });
+}
+
+export function useDeleteBed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ greenhouseId, bedId }: { greenhouseId: number; bedId: number }) =>
+      api.del<void>(`${V1}/greenhouses/${greenhouseId}/beds/${bedId}`),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["beds", v.greenhouseId] });
+      qc.invalidateQueries({ queryKey: ["greenhouses"] });
+      qc.invalidateQueries({ queryKey: ["agent-pressure"] });
+    },
   });
 }
 
@@ -108,6 +158,23 @@ export const usePests = () =>
   useQuery({ queryKey: ["pests"], queryFn: () => api.get<Pest[]>(`${V1}/pests`) });
 export const useDiseases = () =>
   useQuery({ queryKey: ["diseases"], queryFn: () => api.get<Disease[]>(`${V1}/diseases`) });
+/** Pull the master chemical list (with real prices) from the legacy API. */
+export function useImportChemicals() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{
+        fetched: number;
+        created: number;
+        updated: number;
+        skipped: number;
+        needs_agronomy: string[];
+        errors: string[];
+      }>(`${V1}/chemicals/import`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["chemicals"] }),
+  });
+}
+
 export const useChemicals = () =>
   useQuery({ queryKey: ["chemicals"], queryFn: () => api.get<Chemical[]>(`${V1}/chemicals`) });
 
@@ -256,6 +323,35 @@ export const usePoints = (f: Filters = {}) =>
     queryFn: () => api.get<{ lat: number; lng: number; severity: number }[]>(`${V1}/analytics/points${filterQS(f)}`),
   });
 
+/** Daily severity per pest and per disease — one series per agent. */
+export const useAgentTrend = (f: Filters = {}) =>
+  useQuery({
+    queryKey: ["agent-trend", fkey(f)],
+    queryFn: () =>
+      api.get<AgentTrendPoint[]>(`${V1}/analytics/agent-trend${filterQS(f)}`),
+  });
+
+/** One scout's bed-by-bed walk, with dwell time. Null id = nothing selected. */
+export const useScoutMovement = (scoutId: number | null, f: Filters = {}) =>
+  useQuery({
+    queryKey: ["scout-movement", scoutId, fkey(f)],
+    enabled: scoutId != null,
+    queryFn: () =>
+      api.get<ScoutMovement>(
+        `${V1}/analytics/scouts/${scoutId}/movement${filterQS(f)}`,
+      ),
+  });
+
+export const useAgentPressure = (greenhouseId: number | null, f: Filters = {}) =>
+  useQuery({
+    queryKey: ["agent-pressure", greenhouseId, fkey(f)],
+    queryFn: () =>
+      api.get<AgentPressure[]>(
+        `${V1}/analytics/agent-pressure?greenhouse_id=${greenhouseId}&${filterQS(f).slice(1)}`,
+      ),
+    enabled: greenhouseId != null,
+  });
+
 export const useBedPressure = (greenhouseId: number | null, f: Filters = {}) =>
   useQuery({
     queryKey: ["bed-pressure", greenhouseId, fkey(f)],
@@ -357,6 +453,8 @@ export function useSprayPreview() {
       start_date?: string | null;
       pest_id?: number | null;
       disease_id?: number | null;
+      volume_of_water_l?: number | null;
+      rate?: number | null;
     }) => api.post<SprayPreview>(`${V1}/spray/preview`, body),
   });
 }
@@ -368,12 +466,18 @@ export function useCreateSprayProgram() {
     mutationFn: (body: {
       greenhouse_id?: number | null;
       bed_code?: string | null;
+      partition_no?: string | null;
       variety_code?: string | null;
+      type_of_application?: string | null;
       coverage?: string | null;
+      rei?: string | null;
+      volume_of_water_l?: number | null;
       comments?: string | null;
       start_date?: string | null;
+      start_time?: string | null;
+      scout_report_date?: string | null;
       recommendation_id?: number | null;
-      items: { chemical_id: number }[];
+      items: { chemical_id: number; rate?: number | null }[];
       override?: boolean;
     }) => api.post<SprayProgramResult>(`${V1}/spray/program`, body),
     onSuccess: () => {

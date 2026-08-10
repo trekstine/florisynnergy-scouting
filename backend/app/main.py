@@ -32,6 +32,9 @@ settings = get_settings()
 # (IF NOT EXISTS), so this is safe to run on every boot.
 _COLUMN_MIGRATIONS = (
     "ALTER TABLE scouting_records ADD COLUMN IF NOT EXISTS session_comment TEXT;",
+    "ALTER TABLE pests ADD COLUMN IF NOT EXISTS pressure_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.5;",
+    "ALTER TABLE diseases ADD COLUMN IF NOT EXISTS pressure_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.5;",
+    "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS partition_no VARCHAR(50);",
 )
 
 
