@@ -106,3 +106,16 @@ const HAZARD_CLASSES = new Set(["ia", "ib", "i", "ii", "1a", "1b"]);
 export function isHazardous(whoClass: string | null | undefined): boolean {
   return !!whoClass && HAZARD_CLASSES.has(whoClass.trim().toLowerCase());
 }
+
+/**
+ * " · Bed 9" — without doubling a label the code already carries.
+ *
+ * Bed codes are free text and this farm stores them as "Bed 9", so blindly
+ * prefixing produced "Bed Bed 9". Mirrors `bed_phrase` in the backend's
+ * analytics service. A farm storing a bare "9" still gets the word.
+ */
+export function bedLabel(code: string | null | undefined): string {
+  if (!code) return "";
+  const label = code.trim();
+  return /^bed\b/i.test(label) ? label : `Bed ${label}`;
+}

@@ -15,13 +15,7 @@ import { TrendChart } from "@/components/charts";
 import { FilterBar, defaultFilters } from "@/components/FilterBar";
 import { PressureMap } from "@/components/map";
 import { Badge, Spinner } from "@/components/ui";
-import {
-  PRESSURE_HEX,
-  PRESSURE_LABEL,
-  SCOUTING_LABEL,
-  formatDateTime,
-  severityHex,
-} from "@/lib/format";
+import { bedLabel, formatDateTime, PRESSURE_HEX, PRESSURE_LABEL, SCOUTING_LABEL, severityHex } from "@/lib/format";
 import {
   useAgentPressure,
   useBedPressure,
@@ -384,8 +378,7 @@ function GreenhousePanel({
                             </span>
                             {a.hotspot_bed && (
                               <p className="mt-0.5 text-[11px] text-ink-faint">
-                                {/* The code already reads "Bed 9" on this farm. */}
-                                {/^bed/i.test(a.hotspot_bed) ? a.hotspot_bed : `Bed ${a.hotspot_bed}`}
+                                {bedLabel(a.hotspot_bed)}
                               </p>
                             )}
                           </td>

@@ -19,13 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FilterBar, defaultFilters, isoDaysAgo } from "@/components/FilterBar";
 import { PressureMap } from "@/components/map";
 import { Badge, Card, CardHeader, EmptyState, Spinner } from "@/components/ui";
-import {
-  PRESSURE_HEX,
-  PRESSURE_LABEL,
-  SCOUTING_LABEL,
-  relativeTime,
-  severityHex,
-} from "@/lib/format";
+import { bedLabel, PRESSURE_HEX, PRESSURE_LABEL, relativeTime, SCOUTING_LABEL, severityHex } from "@/lib/format";
 import {
   useDiseases,
   useEmployees,
@@ -447,7 +441,7 @@ export default function DashboardPage() {
                       </p>
                       <p className="text-xs text-ink-faint">
                         {r.greenhouse_id ? (ghName.get(r.greenhouse_id) ?? "—") : "—"}
-                        {r.bed_code && ` · Bed ${r.bed_code}`} ·{" "}
+                        {r.bed_code && ` · ${bedLabel(r.bed_code)}`} ·{" "}
                         {relativeTime(r.created_at)}
                       </p>
                     </div>

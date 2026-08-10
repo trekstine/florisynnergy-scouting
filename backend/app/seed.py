@@ -534,6 +534,30 @@ async def seed_if_empty(db: AsyncSession) -> bool:
                 note="Routine preventative cover.",
             )
 
+    # 3. This week's applications.
+    #    Without these, every seeded spray is a fortnight old, every
+    #    pre-harvest interval has long cleared, and the wallboard's re-entry
+    #    and harvest panel — plus the PHI column on the programs table — has
+    #    nothing to show. A real farm sprays continuously; the demo should too.
+    recent = [
+        # (block index, product, hours ago)
+        (1, chem_by_target["Botrytis"][0], 3),      # inside its re-entry window
+        (4, chem_by_target["Downy Mildew"][0], 26),
+        (7, chem_by_target["Spider Mites"][0], 50),
+        (16, chem_by_target["Thrips"][1], 8),
+    ]
+    for idx, chem, hours in recent:
+        if idx >= len(greenhouses):
+            continue
+        await add_program(
+            greenhouses[idx],
+            [chem],
+            now - timedelta(hours=hours),
+            bed_code=None,
+            recommendation_id=None,
+            note="Scheduled block application.",
+        )
+
     db.add_all(sprays)
     await db.flush()
 
