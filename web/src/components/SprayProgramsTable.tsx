@@ -1,6 +1,13 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Download, FileCheck2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ClipboardList,
+  Download,
+  FileCheck2,
+  FileText,
+} from "lucide-react";
 import Link from "next/link";
 import { Fragment, useState } from "react";
 
@@ -31,6 +38,7 @@ export function SprayProgramsTable({
   varietyName,
   employeeName,
   rangeLabel,
+  reportParams,
 }: {
   programs: Program[];
   loading: boolean;
@@ -39,6 +47,8 @@ export function SprayProgramsTable({
   employeeName: Map<number, string>;
   /** Used to name the export file, e.g. "2026-07-11_to_2026-08-10". */
   rangeLabel: string;
+  /** Passed to the printable report so it covers the same slice. */
+  reportParams: Record<string, string>;
 }) {
   const table = usePagination(programs, 10);
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -72,6 +82,17 @@ export function SprayProgramsTable({
         title="Programs"
         subtitle="One row per application event — expand to see the tank mix, dosing and compliance."
         actions={
+          <span className="flex items-center gap-2">
+            <Link
+              href={`/spray-report?${new URLSearchParams(
+                Object.entries(reportParams).filter(([, v]) => v) as [string, string][],
+              )}`}
+              target="_blank"
+              title="Printable report of every chemical application in range"
+              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+            >
+              <FileText size={14} /> Chemical report
+            </Link>
           <button
             onClick={exportCsv}
             disabled={programs.length === 0}
@@ -80,6 +101,7 @@ export function SprayProgramsTable({
           >
             <Download size={14} /> Export CSV ({productLines})
           </button>
+          </span>
         }
       />
       <div className="overflow-auto">
@@ -299,16 +321,35 @@ function ProgramDetail({
         </table>
       </div>
 
-      {/* Provenance: why this happened, and anything overridden. */}
-      <div className="flex flex-wrap items-start gap-x-6 gap-y-2 text-xs">
+      {/* Provenance: why this happened, and anything overridden. The link
+          back to scouting is the point — a spray should always be traceable
+          to the observation that justified it. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
         <span className="text-ink-faint">
           Raised from:{" "}
-          <span className="font-medium text-ink-soft">
-            {head.recommendation_id != null
-              ? `Recommendation #${head.recommendation_id}`
-              : "Routine program (no recommendation)"}
-          </span>
+          {head.recommendation_id != null ? (
+            <Link
+              href={`/recommendations`}
+              className="font-semibold text-brand-700 hover:underline"
+            >
+              Recommendation #{head.recommendation_id}
+            </Link>
+          ) : (
+            <span className="font-medium text-ink-soft">
+              Routine program (no recommendation)
+            </span>
+          )}
         </span>
+        {head.greenhouse_id != null && (
+          <Link
+            href={`/scouting?greenhouse_id=${head.greenhouse_id}${
+              head.scout_report_date ? `&end=${head.scout_report_date}` : ""
+            }`}
+            className="flex items-center gap-1 font-semibold text-brand-700 hover:underline"
+          >
+            <ClipboardList size={13} /> Scouting behind this block
+          </Link>
+        )}
         {head.comments && (
           <span
             className={

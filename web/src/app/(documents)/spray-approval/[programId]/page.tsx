@@ -116,6 +116,32 @@ export default function SprayApprovalPage() {
           </div>
         </header>
 
+        {/* The scouting round that justifies this spray. An approver's first
+            question is "what did we see, and when" — so it leads, rather than
+            sitting as one cell among twelve in the details grid below. */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-2 rounded border border-line bg-surface px-4 py-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-ink-faint">
+              Scouting report date
+            </p>
+            <p className="text-sm font-bold text-ink">
+              {head.scout_report_date ? formatDate(head.scout_report_date) : "Not recorded"}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-ink-faint">
+              Basis for this application
+            </p>
+            <p className="text-sm font-medium text-ink">
+              {head.recommendation_id != null
+                ? `Recommendation #${head.recommendation_id}${
+                    head.target1 ? ` — ${head.target1}` : ""
+                  }`
+                : "Routine preventative program"}
+            </p>
+          </div>
+        </div>
+
         {/* ── Where and when ── */}
         <Section title="Application details">
           <dl className="grid grid-cols-4 gap-x-6 gap-y-3">

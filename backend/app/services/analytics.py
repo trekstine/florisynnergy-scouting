@@ -94,6 +94,21 @@ class Filters:
         return q
 
 
+def bed_phrase(code: str | None) -> str:
+    """" on Bed 9" — without doubling a label the code already carries.
+
+    Bed codes are free text. This farm stores "Bed 9", so blindly prefixing
+    produced "Bed Bed 9" on the pressure map. A farm that stores bare "9"
+    still wants the word.
+    """
+    if not code:
+        return ""
+    label = code.strip()
+    if label.lower().startswith("bed"):
+        return f" on {label}"
+    return f" on Bed {label}"
+
+
 def _band(max_sev: int, over: int) -> str:
     if max_sev <= 0:
         return "none"
@@ -435,7 +450,7 @@ def _headline(agents: list[AgentPressure]) -> str | None:
         return None
     worst = max(actionable, key=lambda a: (a.hotspot, a.max_severity, a.pressure_index))
     if worst.hotspot:
-        where = f" on Bed {worst.hotspot_bed}" if worst.hotspot_bed else ""
+        where = bed_phrase(worst.hotspot_bed)
         return f"{worst.agent_name} severity {worst.max_severity} detected{where}"
     return (
         f"{worst.agent_name} pressure {worst.pressure_index} ≥ ETL {worst.pressure_threshold}"

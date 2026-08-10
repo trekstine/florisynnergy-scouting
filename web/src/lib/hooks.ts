@@ -24,6 +24,7 @@ import type {
   Recommendation,
   RecommendationOutcome,
   ScoutingRecord,
+  ScoutingDetail,
   ScoutMovement,
   ScoutSummary,
   SeverityBucket,
@@ -329,6 +330,14 @@ export const useAgentTrend = (f: Filters = {}) =>
     queryKey: ["agent-trend", fkey(f)],
     queryFn: () =>
       api.get<AgentTrendPoint[]>(`${V1}/analytics/agent-trend${filterQS(f)}`),
+  });
+
+/** One observation with its session, history, recommendation and sprays. */
+export const useScoutingDetail = (id: number | null) =>
+  useQuery({
+    queryKey: ["scouting-detail", id],
+    enabled: id != null,
+    queryFn: () => api.get<ScoutingDetail>(`${V1}/scouting/${id}`),
   });
 
 /** One scout's bed-by-bed walk, with dwell time. Null id = nothing selected. */

@@ -390,6 +390,39 @@ class SprayOut(BaseModel):
     recorded_at: datetime
 
 
+class ScoutingDetail(BaseModel):
+    """One observation with everything a manager needs on a single page.
+
+    Resolves the foreign keys to names, places the record in its scouting
+    session, and — the part that closes the loop — carries the recommendation
+    it raised and any spray program that answered it.
+    """
+
+    record: ScoutingOut
+    greenhouse: str | None = None
+    greenhouse_code: str | None = None
+    pest: str | None = None
+    disease: str | None = None
+    variety: str | None = None
+    scout: str | None = None
+
+    # The session this was captured in (one scout, one round, one batch).
+    session_records: int = 0
+    session_beds: int = 0
+    session_started_at: datetime | None = None
+    session_ended_at: datetime | None = None
+
+    # Observation → recommendation → spray.
+    recommendation_id: int | None = None
+    recommendation_note: str | None = None
+    recommendation_status: str | None = None
+    recommendation_outcome: str | None = None
+    sprays: list[SprayOut] = []
+
+    # Previous readings of the same agent on the same bed, oldest first.
+    history: list[dict] = []
+
+
 class SprayFromRec(BaseModel):
     """Generate a spray program directly from a recommendation."""
 

@@ -543,17 +543,38 @@ export function StackedBarChart({
   keys,
   colors,
   height = 260,
+  xKey = "period",
 }: {
   data: Record<string, string | number>[];
   keys: string[];
   colors: string[];
   height?: number;
+  /** Which field carries the category. Time series use "period"; a
+   *  per-greenhouse breakdown uses "label". Hardcoding "period" silently
+   *  produced an axis with no labels at all. */
+  xKey?: string;
 }) {
+  // Block codes are short and there may be twenty of them — show every one,
+  // angled, rather than letting recharts drop labels to make room.
+  const categorical = xKey !== "period";
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+      <BarChart
+        data={data}
+        margin={{ top: 8, right: 8, left: -16, bottom: categorical ? 28 : 0 }}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke="#eef2f6" vertical={false} />
-        <XAxis dataKey="period" tick={AXIS} tickLine={false} axisLine={false} minTickGap={24} />
+        <XAxis
+          dataKey={xKey}
+          tick={AXIS}
+          tickLine={false}
+          axisLine={false}
+          minTickGap={categorical ? 0 : 24}
+          interval={categorical ? 0 : "preserveEnd"}
+          angle={categorical ? -45 : 0}
+          textAnchor={categorical ? "end" : "middle"}
+          height={categorical ? 46 : 24}
+        />
         <YAxis tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
         <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#f8fafc" }} />
         <Legend wrapperStyle={LEGEND_STYLE} />

@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { TrendChart } from "@/components/charts";
@@ -32,7 +33,7 @@ import {
   useTrend,
   useVarieties,
 } from "@/lib/hooks";
-import type { Filters, GreenhousePressure } from "@/lib/types";
+import type { Filters, GreenhousePressure, ScoutingRecord } from "@/lib/types";
 
 type View = "choropleth" | "heat" | "both";
 
@@ -44,6 +45,8 @@ export default function MapPage() {
     </Suspense>
   );
 }
+
+const EMPTY_RECORDS: ScoutingRecord[] = [];
 
 function MapView() {
   const searchParams = useSearchParams();
@@ -163,6 +166,7 @@ function GreenhousePanel({
   filters: Filters;
   onClose: () => void;
 }) {
+  const [showClean, setShowClean] = useState(false);
   const [tab, setTab] = useState<"overview" | "beds" | "records">("overview");
 
   // Reset to Overview when a different greenhouse is selected, so the panel
@@ -178,6 +182,10 @@ function GreenhousePanel({
     start: filters.start,
     end: filters.end,
     scouting_for: filters.scouting_for || undefined,
+    // A full round covers every bed, so a block easily exceeds the default
+    // 200. The header count comes from an aggregate over all rows — fetching
+    // fewer than that made the panel disagree with its own heading.
+    limit: 1000,
   });
 
   // Reference lookups so the panel can show real names rather than ids/codes.
@@ -202,7 +210,31 @@ function GreenhousePanel({
   }, [varietyList.data]);
 
   const bedRows = beds.data ?? [];
-  const records = scouting.data ?? [];
+  /**
+   * Findings first.
+   *
+   * A round records every bed it walks, most of them clean — that's what
+   * makes the pressure index honest. But it means a panel sorted by time
+   * opens on a wall of "Severity 0/5" and reads as though nothing was found.
+   * Default to what was actually found, and keep the clean beds one click
+   * away as proof of coverage.
+   */
+  // `?? []` allocates a fresh array every render, which would defeat the memo
+  // below — hold the fallback stable.
+  const allRecords = useMemo(() => scouting.data ?? EMPTY_RECORDS, [scouting.data]);
+  const findings = useMemo(
+    () =>
+      [...allRecords]
+        .filter((r) => r.severity > 0)
+        .sort(
+          (a, b) =>
+            b.severity - a.severity ||
+            b.recorded_at.localeCompare(a.recorded_at),
+        ),
+    [allRecords],
+  );
+  const records = showClean ? allRecords : findings;
+  const cleanCount = allRecords.length - findings.length;
 
   return (
     <>
@@ -276,13 +308,13 @@ function GreenhousePanel({
               >
                 <Icon size={14} />
                 {label}
-                {id === "records" && records.length > 0 && (
+                {id === "records" && findings.length > 0 && (
                   <span
                     className={`rounded-full px-1.5 text-[10px] tabular-nums ${
                       active ? "bg-brand-100 text-brand-700" : "bg-surface text-ink-faint"
                     }`}
                   >
-                    {records.length}
+                    {findings.length}
                   </span>
                 )}
               </button>
@@ -352,7 +384,8 @@ function GreenhousePanel({
                             </span>
                             {a.hotspot_bed && (
                               <p className="mt-0.5 text-[11px] text-ink-faint">
-                                Bed {a.hotspot_bed}
+                                {/* The code already reads "Bed 9" on this farm. */}
+                                {/^bed/i.test(a.hotspot_bed) ? a.hotspot_bed : `Bed ${a.hotspot_bed}`}
                               </p>
                             )}
                           </td>
@@ -437,8 +470,21 @@ function GreenhousePanel({
         )}
 
         {tab === "records" && (
-          <Section title="Scouting records" hint="Newest first">
+          <Section
+            title="Scouting records"
+            hint={showClean ? "Whole round, newest first" : "Findings first, worst severity at the top"}
+          >
             {scouting.isLoading && <Spinner />}
+            {cleanCount > 0 && (
+              <button
+                onClick={() => setShowClean((v) => !v)}
+                className="mb-3 w-full rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+              >
+                {showClean
+                  ? `Hide ${cleanCount} clean bed${cleanCount === 1 ? "" : "s"}`
+                  : `Show ${cleanCount} clean bed${cleanCount === 1 ? "" : "s"} walked with nothing found`}
+              </button>
+            )}
             <ul className="space-y-2">
               {records.map((s) => {
                 // Lead with the actual agent name (disease or pest) rather
@@ -453,11 +499,12 @@ function GreenhousePanel({
                   ? (varietyName.get(s.variety_code) ?? s.variety_code)
                   : null;
                 return (
-                  <li
-                    key={s.id}
-                    className="rounded-lg border border-line p-3 transition-colors hover:border-brand-200 hover:bg-surface"
-                    style={{ borderLeft: `3px solid ${severityHex(s.severity)}` }}
-                  >
+                  <li key={s.id}>
+                    <Link
+                      href={`/scouting/${s.id}`}
+                      className="block rounded-lg border border-line p-3 transition-colors hover:border-brand-200 hover:bg-surface"
+                      style={{ borderLeft: `3px solid ${severityHex(s.severity)}` }}
+                    >
                     <div className="flex items-center justify-between gap-2">
                       <span
                         className="truncate text-sm font-semibold text-ink"
@@ -485,11 +532,16 @@ function GreenhousePanel({
                       {SCOUTING_LABEL[s.scouting_for]} · {s.bed_code ?? "—"} ·{" "}
                       {formatDateTime(s.recorded_at)}
                     </p>
+                    </Link>
                   </li>
                 );
               })}
               {records.length === 0 && !scouting.isLoading && (
-                <li className="text-sm text-ink-faint">No scouting records.</li>
+                <li className="text-sm text-ink-faint">
+                  {allRecords.length > 0
+                    ? "Every bed walked came back clean."
+                    : "No scouting records."}
+                </li>
               )}
             </ul>
           </Section>

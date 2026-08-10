@@ -78,7 +78,7 @@ const TABS = [
   { id: "coverage", group: "Spray", label: "Coverage", blurb: "How much area or crop coverage is being addressed." },
   { id: "cost", group: "Spray", label: "Cost", blurb: "Spray spending and financial impact." },
   { id: "gh-cost", group: "Spray", label: "Cost by greenhouse", blurb: "Where the highest spray costs are going." },
-  { id: "chemicals", group: "Spray", label: "Chemicals", blurb: "Which chemicals are being used most." },
+  { id: "chemicals", group: "Spray", label: "Cost by chemical", blurb: "Where the chemical budget goes, and how much product it buys." },
   { id: "variety-cost", group: "Spray", label: "Cost by variety", blurb: "Which varieties are driving spray spend." },
 ] as const;
 
@@ -358,6 +358,35 @@ export default function AnalyticsPage() {
   }
 
   const coverageBreakdown = useMemo(() => countBy(filteredSpray, (r) => r.coverage), [filteredSpray]);
+
+  /**
+   * Coverage *per block*, not farm-wide.
+   *
+   * "19 full cover, 13 top cover" across the estate tells a manager nothing
+   * actionable. Which blocks got full cover and which only got a top pass is
+   * the question — it's how you spot a block that has been under-treated.
+   */
+  const coverageByGreenhouse = useMemo(() => {
+    const types = [...new Set(filteredSpray.map((r) => r.coverage?.trim()).filter(Boolean))] as string[];
+    const byBlock = new Map<string, Record<string, number>>();
+    for (const r of filteredSpray) {
+      if (r.greenhouse_id == null) continue;
+      const block = ghCode.get(r.greenhouse_id) ?? `GH#${r.greenhouse_id}`;
+      const type = r.coverage?.trim() || "Unspecified";
+      const row = byBlock.get(block) ?? {};
+      row[type] = (row[type] ?? 0) + 1;
+      byBlock.set(block, row);
+    }
+    const keys = types.length ? types : ["Unspecified"];
+    const data = [...byBlock.entries()]
+      .map(([label, counts]) => {
+        const filled: Record<string, string | number> = { label };
+        for (const k of keys) filled[k] = counts[k] ?? 0;
+        return filled;
+      })
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+    return { data, keys };
+  }, [filteredSpray, ghCode]);
   const chemicalBreakdown = useMemo(() => countBy(filteredSpray, (r) => r.product), [filteredSpray]);
   const chemicalCostBreakdown = useMemo(() => costBy(filteredSpray, (r) => r.product), [filteredSpray]);
   // Full variety names, not the three-letter code the record stores.
@@ -992,11 +1021,19 @@ export default function AnalyticsPage() {
                     ) : (
                       scoutingTable.paged.map((row) => (
                         <tr key={row.r.id} className="align-top hover:bg-surface">
-                          <td className="whitespace-nowrap px-3 py-2.5 text-ink-soft">
-                            {new Date(row.r.recorded_at).toLocaleString("en-GB", {
-                              dateStyle: "medium",
-                              timeStyle: "short",
-                            })}
+                          <td className="whitespace-nowrap px-3 py-2.5">
+                            {/* The timestamp is the row's handle — open the
+                                full record rather than squeezing more columns
+                                into an already wide table. */}
+                            <Link
+                              href={`/scouting/${row.r.id}`}
+                              className="font-medium text-brand-700 hover:underline"
+                            >
+                              {new Date(row.r.recorded_at).toLocaleString("en-GB", {
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                              })}
+                            </Link>
                           </td>
                           <td className="whitespace-nowrap px-3 py-2.5 text-ink-soft">
                             {row.greenhouse}
@@ -1305,17 +1342,44 @@ export default function AnalyticsPage() {
               varietyName={varietyName}
               employeeName={scoutName}
               rangeLabel={`${filters.start}_to_${filters.end}`}
+              reportParams={{
+                start: filters.start ?? "",
+                end: filters.end ?? "",
+                greenhouse_id: filters.greenhouse_id ? String(filters.greenhouse_id) : "",
+              }}
             />
           </div>
         </>
       )}
 
       {activeTab === "coverage" && (
-        <div className="px-6">
+        <div className="space-y-5 px-6">
           <Card>
             <CardHeader
-              title="Coverage report"
-              subtitle="How spray activities are distributed by coverage type."
+              title="Coverage by greenhouse"
+              subtitle="Which blocks received full cover and which only a top pass."
+            />
+            <div className="p-4">
+              {spray.isLoading ? (
+                <Spinner />
+              ) : coverageByGreenhouse.data.length === 0 ? (
+                <EmptyState>No spray coverage data in range.</EmptyState>
+              ) : (
+                <StackedBarChart
+                  data={coverageByGreenhouse.data}
+                  keys={coverageByGreenhouse.keys}
+                  colors={STACK_COLORS}
+                  height={340}
+                  xKey="label"
+                />
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Coverage mix"
+              subtitle="Farm-wide split of applications by coverage type."
             />
             <div className="p-4">
               {spray.isLoading ? (
@@ -1326,7 +1390,8 @@ export default function AnalyticsPage() {
                 <HBarChart
                   data={coverageBreakdown.slice(0, 8).map((r) => ({ label: r.label, value: r.value }))}
                   color="#0ea5e9"
-                  height={240}
+                  height={200}
+                  seriesLabel="Applications"
                 />
               )}
             </div>

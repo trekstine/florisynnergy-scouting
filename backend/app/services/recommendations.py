@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Disease, Pest, Recommendation, ScoutingRecord
+from .analytics import bed_phrase
 from .etl import effective_threshold
 
 # One observation at/above this severity is an immediate hotspot, regardless
@@ -46,7 +47,7 @@ async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
         name = pest.name if pest else "Pest"
         scope = "" if resolved.source == "default" else f" [{resolved.source} ETL]"
         if is_hotspot and rec.severity < resolved.threshold:
-            where = f" on Bed {rec.bed_code}" if rec.bed_code else ""
+            where = bed_phrase(rec.bed_code)
             note = f"Hotspot — {name} severity {rec.severity} detected{where}"
         else:
             note = f"{name} {rec.severity} ≥ ETL {resolved.threshold}{scope}"
@@ -82,7 +83,7 @@ async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
         name = disease.name if disease else "Disease"
         scope = "" if resolved.source == "default" else f" [{resolved.source} ETL]"
         if is_hotspot and rec.severity < resolved.threshold:
-            where = f" on Bed {rec.bed_code}" if rec.bed_code else ""
+            where = bed_phrase(rec.bed_code)
             note = f"Hotspot — {name} severity {rec.severity} detected{where}"
         else:
             note = f"{name} {rec.severity} ≥ ETL {resolved.threshold}{scope}"

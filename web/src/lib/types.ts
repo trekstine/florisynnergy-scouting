@@ -158,6 +158,34 @@ export interface SprayRecord {
   recorded_at: string;
 }
 
+export interface ScoutingHistoryPoint {
+  id: number;
+  severity: number;
+  recorded_at: string;
+  is_this: boolean;
+}
+
+/** One observation plus its session, its history, and the loop it started. */
+export interface ScoutingDetail {
+  record: ScoutingRecord;
+  greenhouse: string | null;
+  greenhouse_code: string | null;
+  pest: string | null;
+  disease: string | null;
+  variety: string | null;
+  scout: string | null;
+  session_records: number;
+  session_beds: number;
+  session_started_at: string | null;
+  session_ended_at: string | null;
+  recommendation_id: number | null;
+  recommendation_note: string | null;
+  recommendation_status: RecStatus | null;
+  recommendation_outcome: string | null;
+  sprays: SprayRecord[];
+  history: ScoutingHistoryPoint[];
+}
+
 export type OutcomeVerdict =
   | "no_data"
   | "resolved_ready"
