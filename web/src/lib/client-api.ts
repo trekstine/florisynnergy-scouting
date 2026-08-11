@@ -17,7 +17,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers: {
       Accept: "application/json",
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      // FormData must set its own Content-Type so the multipart boundary
+      // survives; forcing JSON here would corrupt every file upload.
+      ...(init.body && !(init.body instanceof FormData)
+        ? { "Content-Type": "application/json" }
+        : {}),
       ...init.headers,
     },
   });
@@ -45,6 +49,9 @@ export const api = {
   patch: <T>(p: string, body?: unknown) =>
     request<T>(p, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
   del: <T>(p: string) => request<T>(p, { method: "DELETE" }),
+  /** Multipart upload — the browser sets the boundary. */
+  upload: <T>(p: string, form: FormData) =>
+    request<T>(p, { method: "POST", body: form }),
 };
 
 export const V1 = "/api/v1";

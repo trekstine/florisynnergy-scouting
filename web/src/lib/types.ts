@@ -155,7 +155,80 @@ export interface SprayRecord {
   start_date: string | null;
   start_time: string | null;
   scout_report_date: string | null;
+  program_status: ProgramStatus;
+  applied_at: string | null;
+  reviewed_at: string | null;
+  review_comment: string | null;
+  effectiveness: Effectiveness | null;
   recorded_at: string;
+}
+
+/** Planned before it is sprayed; reviewed only after a follow-up round. */
+export type ProgramStatus = "planned" | "applied" | "reviewed";
+export type Effectiveness = "effective" | "partial" | "ineffective";
+
+export interface SprayAttachment {
+  id: number;
+  program_id: string;
+  filename: string;
+  url: string;
+  content_type: string | null;
+  size_bytes: number | null;
+  kind: string | null;
+  note: string | null;
+  uploaded_by: number | null;
+  uploaded_at: string;
+}
+
+/** A spray program as seen from the scouting side of the loop. */
+export interface ProgramSummary {
+  program_id: string;
+  greenhouse_id: number | null;
+  greenhouse: string | null;
+  bed_code: string | null;
+  start_date: string | null;
+  products: string[];
+  total_cost: number;
+  program_status: ProgramStatus;
+  safe_harvest_date: string | null;
+  recommendation_id: number | null;
+  attachments: number;
+}
+
+/** One scouting round — what a farm calls a scouting report. */
+export interface RoundSummary {
+  batch_id: string;
+  greenhouse_id: number | null;
+  greenhouse: string | null;
+  greenhouse_code: string | null;
+  scout_id: number | null;
+  scout: string | null;
+  started_at: string;
+  ended_at: string;
+  records: number;
+  beds: number;
+  findings: number;
+  max_severity: number;
+  session_comment: string | null;
+  agents: string[];
+  programs: number;
+}
+
+export interface RoundRecommendation {
+  id: number;
+  status: RecStatus;
+  note: string | null;
+  outcome_note: string | null;
+  trigger_severity: number;
+  bed_code: string | null;
+  created_at: string;
+}
+
+export interface RoundDetail {
+  round: RoundSummary;
+  entries: ScoutingRecord[];
+  recommendations: RoundRecommendation[];
+  programs: ProgramSummary[];
 }
 
 export interface ScoutingHistoryPoint {

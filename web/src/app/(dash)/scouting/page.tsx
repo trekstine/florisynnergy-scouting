@@ -5,6 +5,7 @@ import {
   Bug,
   Camera,
   Check,
+  ClipboardList,
   Download,
   MapPin,
   ShieldAlert,
@@ -319,9 +320,19 @@ export default function ScoutingPage() {
         title="Scouting"
         subtitle="Field observations, coverage, and threshold triage"
         actions={
-          <Button variant="outline" onClick={exportCsv} disabled={!rows.length}>
-            <Download className="h-4 w-4" /> Export CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* A farm thinks in reports (rounds), not individual records —
+                this is the way into that view. */}
+            <Link
+              href="/scouting/rounds"
+              className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+            >
+              <ClipboardList className="h-4 w-4" /> Scouting reports
+            </Link>
+            <Button variant="outline" onClick={exportCsv} disabled={!rows.length}>
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+          </div>
         }
       />
 

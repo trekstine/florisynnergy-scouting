@@ -11,7 +11,9 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from collections import defaultdict
+
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,11 +26,15 @@ from ..models import (
     Pest,
     Recommendation,
     ScoutingRecord,
+    SprayAttachment,
     SprayRecord,
     Variety,
 )
 from ..schemas import (
     BatchResult,
+    ProgramSummary,
+    RoundDetail,
+    RoundSummary,
     ScoutingBatch,
     ScoutingDetail,
     ScoutingOut,
@@ -179,6 +185,243 @@ async def submit_batch(
     await db.commit()
     result.recommendations_created = recs_created
     return result
+
+
+# ───────────────────────────── Scouting rounds ──────────────────────────────
+# A farm says "scouting report" and means a round: one scout, one block, one
+# walk, many records. The batch_id already groups them; these endpoints make
+# the round a first-class thing you can open — and, crucially, show the spray
+# programs that came out of it.
+
+
+async def _round_summary(db: AsyncSession, batch_id: str) -> RoundSummary:
+    row = (
+        await db.execute(
+            select(
+                func.min(ScoutingRecord.recorded_at).label("started"),
+                func.max(ScoutingRecord.recorded_at).label("ended"),
+                func.count().label("records"),
+                func.count(func.distinct(ScoutingRecord.bed_code)).label("beds"),
+                func.count()
+                .filter(ScoutingRecord.severity > 0)
+                .label("findings"),
+                func.coalesce(func.max(ScoutingRecord.severity), 0).label("max_sev"),
+                func.min(ScoutingRecord.greenhouse_id).label("gh"),
+                func.min(ScoutingRecord.scout_id).label("scout"),
+            ).where(ScoutingRecord.batch_id == batch_id)
+        )
+    ).one()
+    if not row.records:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scouting round not found")
+
+    gh = await db.get(Greenhouse, row.gh) if row.gh else None
+    scout = await db.get(Employee, row.scout) if row.scout else None
+    comment = (
+        await db.execute(
+            select(ScoutingRecord.session_comment)
+            .where(
+                ScoutingRecord.batch_id == batch_id,
+                ScoutingRecord.session_comment.isnot(None),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    agents = [
+        n
+        for (n,) in (
+            await db.execute(
+                select(func.distinct(Pest.name))
+                .select_from(ScoutingRecord)
+                .join(Pest, Pest.id == ScoutingRecord.pest_id)
+                .where(ScoutingRecord.batch_id == batch_id, ScoutingRecord.severity > 0)
+            )
+        ).all()
+    ] + [
+        n
+        for (n,) in (
+            await db.execute(
+                select(func.distinct(Disease.name))
+                .select_from(ScoutingRecord)
+                .join(Disease, Disease.id == ScoutingRecord.disease_id)
+                .where(ScoutingRecord.batch_id == batch_id, ScoutingRecord.severity > 0)
+            )
+        ).all()
+    ]
+
+    return RoundSummary(
+        batch_id=batch_id,
+        greenhouse_id=row.gh,
+        greenhouse=gh.name if gh else None,
+        greenhouse_code=gh.code if gh else None,
+        scout_id=row.scout,
+        scout=scout.name if scout else None,
+        started_at=row.started,
+        ended_at=row.ended,
+        records=int(row.records),
+        beds=int(row.beds or 0),
+        findings=int(row.findings or 0),
+        max_severity=int(row.max_sev or 0),
+        session_comment=comment,
+        agents=sorted(set(agents)),
+    )
+
+
+async def _programs_for(db: AsyncSession, rec_ids: list[int]) -> list[ProgramSummary]:
+    """Spray programs raised against any of these recommendations."""
+    if not rec_ids:
+        return []
+    rows = list(
+        (
+            await db.execute(
+                select(SprayRecord)
+                .where(SprayRecord.recommendation_id.in_(rec_ids))
+                .order_by(SprayRecord.recorded_at.asc())
+            )
+        ).scalars().all()
+    )
+    by_program: dict[str, list[SprayRecord]] = defaultdict(list)
+    for r in rows:
+        by_program[r.program_id or f"#{r.id}"].append(r)
+
+    out: list[ProgramSummary] = []
+    for pid, group in by_program.items():
+        head = group[0]
+        gh = await db.get(Greenhouse, head.greenhouse_id) if head.greenhouse_id else None
+        attachments = (
+            await db.execute(
+                select(func.count())
+                .select_from(SprayAttachment)
+                .where(SprayAttachment.program_id == pid)
+            )
+        ).scalar_one()
+        harvest = [r.safe_harvest_date for r in group if r.safe_harvest_date]
+        out.append(
+            ProgramSummary(
+                program_id=pid,
+                greenhouse_id=head.greenhouse_id,
+                greenhouse=gh.name if gh else None,
+                bed_code=head.bed_code,
+                start_date=head.start_date,
+                products=sorted({r.product for r in group if r.product}),
+                total_cost=round(sum(float(r.cost_of_chemical or 0) for r in group), 2),
+                program_status=head.program_status or "planned",
+                safe_harvest_date=max(harvest) if harvest else None,
+                recommendation_id=head.recommendation_id,
+                attachments=int(attachments or 0),
+            )
+        )
+    return out
+
+
+@router.get("/rounds", response_model=list[RoundSummary])
+async def list_rounds(
+    db: AsyncSession = Depends(get_db),
+    current: Employee = Depends(get_current_employee),
+    greenhouse_id: int | None = Query(default=None),
+    start: date | None = Query(default=None),
+    end: date | None = Query(default=None),
+    limit: int = Query(default=100, le=500),
+):
+    """Scouting rounds, newest first — the list a manager thinks of as reports."""
+    q = select(
+        ScoutingRecord.batch_id,
+        func.max(ScoutingRecord.recorded_at).label("ended"),
+    ).where(ScoutingRecord.batch_id.isnot(None))
+
+    if current.role == "scout":
+        q = q.where(ScoutingRecord.scout_id == current.id)
+    if greenhouse_id is not None:
+        q = q.where(ScoutingRecord.greenhouse_id == greenhouse_id)
+    if start is not None:
+        q = q.where(
+            ScoutingRecord.recorded_at
+            >= datetime.combine(start, time.min, tzinfo=timezone.utc)
+        )
+    if end is not None:
+        q = q.where(
+            ScoutingRecord.recorded_at
+            < datetime.combine(end, time.min, tzinfo=timezone.utc) + timedelta(days=1)
+        )
+
+    batches = (
+        await db.execute(
+            q.group_by(ScoutingRecord.batch_id).order_by(func.max(ScoutingRecord.recorded_at).desc()).limit(limit)
+        )
+    ).all()
+    return [await _round_summary(db, b.batch_id) for b in batches]
+
+
+@router.get("/rounds/{batch_id}", response_model=RoundDetail)
+async def round_detail(
+    batch_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(get_current_employee),
+):
+    """One scouting round, with the recommendations and sprays it produced.
+
+    This answers the question the record page could not: a report is a round
+    of many records, and the manager wants to know what the *round* led to.
+    """
+    summary = await _round_summary(db, batch_id)
+
+    entries = list(
+        (
+            await db.execute(
+                select(ScoutingRecord)
+                .where(ScoutingRecord.batch_id == batch_id)
+                .order_by(
+                    ScoutingRecord.severity.desc(), ScoutingRecord.recorded_at.asc()
+                )
+            )
+        ).scalars().all()
+    )
+
+    # The recommendations this round's findings raised: same block, same agent,
+    # dated within the round's window.
+    pest_ids = {e.pest_id for e in entries if e.pest_id and e.severity > 0}
+    disease_ids = {e.disease_id for e in entries if e.disease_id and e.severity > 0}
+    recs: list[Recommendation] = []
+    if summary.greenhouse_id and (pest_ids or disease_ids):
+        clauses = []
+        if pest_ids:
+            clauses.append(Recommendation.pest_id.in_(pest_ids))
+        if disease_ids:
+            clauses.append(Recommendation.disease_id.in_(disease_ids))
+        recs = list(
+            (
+                await db.execute(
+                    select(Recommendation)
+                    .where(
+                        Recommendation.greenhouse_id == summary.greenhouse_id,
+                        or_(*clauses),
+                        Recommendation.created_at >= summary.started_at,
+                    )
+                    .order_by(Recommendation.created_at.asc())
+                )
+            ).scalars().all()
+        )
+
+    programs = await _programs_for(db, [r.id for r in recs])
+    summary.programs = len(programs)
+
+    return RoundDetail(
+        round=summary,
+        entries=[ScoutingOut.model_validate(e) for e in entries],
+        recommendations=[
+            {
+                "id": r.id,
+                "status": r.status,
+                "note": r.note,
+                "outcome_note": r.outcome_note,
+                "trigger_severity": r.trigger_severity,
+                "bed_code": r.bed_code,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in recs
+        ],
+        programs=programs,
+    )
 
 
 @router.get("/{record_id}", response_model=ScoutingDetail)

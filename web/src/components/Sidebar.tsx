@@ -3,6 +3,7 @@
 import {
   Bug,
   ClipboardList,
+  FileText,
   LayoutDashboard,
   Map,
   Settings,
@@ -34,6 +35,7 @@ const GROUPS: {
     label: "Operations",
     items: [
       { href: "/scouting", label: "Scouting", icon: ClipboardList },
+      { href: "/scouting/rounds", label: "Scouting Reports", icon: FileText },
       { href: "/recommendations", label: "Recommendations", icon: Bug },
       { href: "/spray", label: "Spray Programs", icon: SprayCan },
     ],
@@ -53,6 +55,16 @@ export const SETTINGS_CHILDREN = [
 
 /** Routes that belong to the Settings area (hub + its three sub-pages). */
 export const SETTINGS_ROUTES = ["/settings", ...SETTINGS_CHILDREN.map((c) => c.href)];
+
+/**
+ * Every href the rail can highlight. Used to resolve nesting: /scouting/rounds
+ * sits under /scouting, so a plain prefix test would light up both. The longest
+ * matching entry wins instead.
+ */
+const ALL_HREFS = [
+  ...GROUPS.flatMap((g) => g.items.map((i) => i.href)),
+  ...SETTINGS_ROUTES,
+];
 
 function NavItem({
   href,
@@ -85,8 +97,13 @@ function NavItem({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string) => {
+    if (pathname !== href && !pathname.startsWith(`${href}/`)) return false;
+    const best = ALL_HREFS.filter(
+      (h) => pathname === h || pathname.startsWith(`${h}/`),
+    ).sort((a, b) => b.length - a.length)[0];
+    return best === href;
+  };
   const settingsActive = SETTINGS_ROUTES.some(isActive);
 
   return (

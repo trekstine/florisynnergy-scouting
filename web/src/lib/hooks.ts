@@ -24,10 +24,14 @@ import type {
   Recommendation,
   RecommendationOutcome,
   ScoutingRecord,
+  ProgramStatus,
+  RoundDetail,
+  RoundSummary,
   ScoutingDetail,
   ScoutMovement,
   ScoutSummary,
   SeverityBucket,
+  SprayAttachment,
   SprayCostRow,
   SprayPreview,
   SprayProgramResult,
@@ -331,6 +335,98 @@ export const useAgentTrend = (f: Filters = {}) =>
     queryFn: () =>
       api.get<AgentTrendPoint[]>(`${V1}/analytics/agent-trend${filterQS(f)}`),
   });
+
+/** Scouting rounds — the unit a farm calls a "scouting report". */
+export const useRounds = (params?: {
+  greenhouse_id?: number;
+  start?: string;
+  end?: string;
+  limit?: number;
+}) => {
+  const qs = new URLSearchParams();
+  if (params?.greenhouse_id) qs.set("greenhouse_id", String(params.greenhouse_id));
+  if (params?.start) qs.set("start", params.start);
+  if (params?.end) qs.set("end", params.end);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const s = qs.toString();
+  return useQuery({
+    queryKey: ["rounds", s],
+    queryFn: () => api.get<RoundSummary[]>(`${V1}/scouting/rounds${s ? `?${s}` : ""}`),
+  });
+};
+
+/** One round with its records, recommendations and resulting spray programs. */
+export const useRound = (batchId: string | null) =>
+  useQuery({
+    queryKey: ["round", batchId],
+    enabled: !!batchId,
+    queryFn: () => api.get<RoundDetail>(`${V1}/scouting/rounds/${batchId}`),
+  });
+
+// ── Spray program lifecycle + e-filing ──
+export function useUpdateProgramStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      programId,
+      ...body
+    }: {
+      programId: string;
+      status: ProgramStatus;
+      applied_at?: string | null;
+      review_comment?: string | null;
+      effectiveness?: string | null;
+    }) => api.patch<SprayRecord[]>(`${V1}/spray/programs/${programId}/status`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["spray"] });
+      qc.invalidateQueries({ queryKey: ["round"] });
+      qc.invalidateQueries({ queryKey: ["rounds"] });
+    },
+  });
+}
+
+export const useAttachments = (programId: string | null) =>
+  useQuery({
+    queryKey: ["attachments", programId],
+    enabled: !!programId,
+    queryFn: () =>
+      api.get<SprayAttachment[]>(`${V1}/spray/programs/${programId}/attachments`),
+  });
+
+export function useAddAttachment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      programId,
+      ...body
+    }: {
+      programId: string;
+      filename: string;
+      url: string;
+      content_type?: string | null;
+      size_bytes?: number | null;
+      kind?: string | null;
+      note?: string | null;
+    }) =>
+      api.post<SprayAttachment>(`${V1}/spray/programs/${programId}/attachments`, body),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["attachments", v.programId] });
+      qc.invalidateQueries({ queryKey: ["round"] });
+    },
+  });
+}
+
+export function useDeleteAttachment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programId, id }: { programId: string; id: number }) =>
+      api.del<void>(`${V1}/spray/programs/${programId}/attachments/${id}`),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["attachments", v.programId] });
+      qc.invalidateQueries({ queryKey: ["round"] });
+    },
+  });
+}
 
 /** One observation with its session, history, recommendation and sprays. */
 export const useScoutingDetail = (id: number | null) =>

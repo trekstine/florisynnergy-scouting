@@ -169,7 +169,20 @@ export default function ScoutingDetailPage() {
 
         {/* ── Who and when ── */}
         <Card>
-          <CardHeader title="Scouting round" subtitle="The batch this came in with" />
+          <CardHeader
+            title="Scouting round"
+            subtitle="The batch this came in with"
+            actions={
+              r.batch_id ? (
+                <Link
+                  href={`/scouting/rounds/${r.batch_id}`}
+                  className="text-xs font-semibold text-brand-700 hover:underline"
+                >
+                  Open full report →
+                </Link>
+              ) : undefined
+            }
+          />
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3 p-5">
             <Field label="Scout" icon={<User size={12} />}>
               {d.scout ?? "—"}

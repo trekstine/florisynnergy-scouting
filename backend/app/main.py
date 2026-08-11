@@ -35,6 +35,14 @@ _COLUMN_MIGRATIONS = (
     "ALTER TABLE pests ADD COLUMN IF NOT EXISTS pressure_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.5;",
     "ALTER TABLE diseases ADD COLUMN IF NOT EXISTS pressure_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.5;",
     "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS partition_no VARCHAR(50);",
+    # Program lifecycle — planned → applied → reviewed.
+    "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS program_status VARCHAR(20) NOT NULL DEFAULT 'planned';",
+    "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ;",
+    "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS applied_by INTEGER;",
+    "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;",
+    "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS reviewed_by INTEGER;",
+    "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS review_comment TEXT;",
+    "ALTER TABLE spray_records ADD COLUMN IF NOT EXISTS effectiveness VARCHAR(20);",
 )
 
 

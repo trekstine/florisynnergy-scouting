@@ -387,6 +387,11 @@ class SprayOut(BaseModel):
     start_date: date | None
     start_time: time | None = None
     scout_report_date: date | None = None
+    program_status: str = "planned"
+    applied_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    review_comment: str | None = None
+    effectiveness: str | None = None
     recorded_at: datetime
 
 
@@ -421,6 +426,84 @@ class ScoutingDetail(BaseModel):
 
     # Previous readings of the same agent on the same bed, oldest first.
     history: list[dict] = []
+
+
+class SprayStatusUpdate(BaseModel):
+    """Move a program along: planned → applied → reviewed."""
+
+    status: Literal["planned", "applied", "reviewed"]
+    applied_at: datetime | None = None
+    review_comment: str | None = None
+    # The human read on whether it worked, recorded alongside the engine's.
+    effectiveness: Literal["effective", "partial", "ineffective"] | None = None
+
+
+class SprayAttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    program_id: str
+    filename: str
+    url: str
+    content_type: str | None = None
+    size_bytes: int | None = None
+    kind: str | None = None
+    note: str | None = None
+    uploaded_by: int | None = None
+    uploaded_at: datetime
+
+
+class SprayAttachmentCreate(BaseModel):
+    """Register a file already uploaded via /media/upload against a program."""
+
+    filename: str = Field(max_length=255)
+    url: str = Field(max_length=500)
+    content_type: str | None = None
+    size_bytes: int | None = None
+    kind: str | None = Field(default=None, max_length=40)
+    note: str | None = None
+
+
+class ProgramSummary(BaseModel):
+    """A spray program as seen from the scouting side of the loop."""
+
+    program_id: str
+    greenhouse_id: int | None = None
+    greenhouse: str | None = None
+    bed_code: str | None = None
+    start_date: date | None = None
+    products: list[str] = []
+    total_cost: float = 0
+    program_status: str = "planned"
+    safe_harvest_date: date | None = None
+    recommendation_id: int | None = None
+    attachments: int = 0
+
+
+class RoundSummary(BaseModel):
+    """One scouting round — the thing a farm calls a scouting report."""
+
+    batch_id: str
+    greenhouse_id: int | None = None
+    greenhouse: str | None = None
+    greenhouse_code: str | None = None
+    scout_id: int | None = None
+    scout: str | None = None
+    started_at: datetime
+    ended_at: datetime
+    records: int
+    beds: int
+    findings: int
+    max_severity: int
+    session_comment: str | None = None
+    agents: list[str] = []
+    programs: int = 0
+
+
+class RoundDetail(BaseModel):
+    round: RoundSummary
+    entries: list[ScoutingOut] = []
+    recommendations: list[dict] = []
+    programs: list[ProgramSummary] = []
 
 
 class SprayFromRec(BaseModel):

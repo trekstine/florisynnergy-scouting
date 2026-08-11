@@ -16,6 +16,7 @@ import { useMemo, useState } from "react";
 
 import { PaginationBar, usePagination } from "@/components/Pagination";
 import { SprayProgramBuilder } from "@/components/SprayProgramBuilder";
+import { STATUS_HEX, SprayProgramPanel } from "@/components/SprayProgramPanel";
 import {
   Badge,
   Button,
@@ -29,7 +30,7 @@ import {
 import { formatDate, isHazardous, money } from "@/lib/format";
 import { useEmployees, useGreenhouses, useSpray, useVarieties } from "@/lib/hooks";
 import { buildSprayCsv, downloadCsv, programKey } from "@/lib/sprayExport";
-import type { SprayRecord } from "@/lib/types";
+import type { ProgramStatus, SprayRecord } from "@/lib/types";
 
 /** A program is one application event — one block, one date, N tank-mixed products. */
 interface Program {
@@ -46,6 +47,7 @@ interface Program {
   safeHarvest: string | null;
   fromRecommendation: boolean;
   hazardous: boolean;
+  status: ProgramStatus;
 }
 
 export default function SprayPage() {
@@ -118,6 +120,7 @@ export default function SprayPage() {
           safeHarvest: r.safe_harvest_date,
           fromRecommendation: r.recommendation_id != null,
           hazardous: isHazardous(r.who_class),
+          status: r.program_status ?? "planned",
         });
       } else {
         existing.products.push(r);
@@ -329,6 +332,13 @@ export default function SprayPage() {
                               {p.products.length} product
                               {p.products.length === 1 ? "" : "s"}
                             </Badge>
+                            <Badge color={STATUS_HEX[p.status]}>
+                              {p.status === "planned"
+                                ? "Planned"
+                                : p.status === "applied"
+                                  ? "Applied"
+                                  : "Reviewed"}
+                            </Badge>
                             {p.fromRecommendation && (
                               <Badge color="#059669">From recommendation</Badge>
                             )}
@@ -438,6 +448,12 @@ export default function SprayPage() {
                             ))}
                           </tbody>
                         </table>
+
+                        {/* Status, documents and the scouting behind the block —
+                            all on this screen rather than in a new tab. */}
+                        <div className="mt-4">
+                          <SprayProgramPanel programId={p.id} records={p.products} />
+                        </div>
                       </div>
                     )}
                   </li>

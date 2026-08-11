@@ -11,16 +11,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..deps import get_current_employee, require_roles
-from ..models import Chemical, Employee, Recommendation, SprayRecord
+from ..models import (
+    Chemical,
+    Employee,
+    Recommendation,
+    SprayAttachment,
+    SprayRecord,
+)
 from ..schemas import (
     BatchResult,
     ComplianceIssue,
+    SprayAttachmentCreate,
+    SprayAttachmentOut,
     SprayBatch,
     SprayOut,
     SprayPreviewOut,
     SprayPreviewRequest,
     SprayProgramCreate,
     SprayProgramOut,
+    SprayStatusUpdate,
 )
 from ..services.compliance import blocked as is_blocked
 from ..services.compliance import check_spray
@@ -296,3 +305,126 @@ async def create_spray_program(
         # The block is locked until the *longest* PHI clears.
         safe_harvest_date=max(harvest_dates) if harvest_dates else None,
     )
+
+
+# ───────────────────── Program lifecycle & e-filing ─────────────────────
+# A program is planned before it is sprayed and only reviewed once a later
+# round has been walked. The status lives on every row of the program (they
+# share a program_id), so any one record answers "did this actually go out?".
+
+
+async def _program_rows(db: AsyncSession, program_id: str) -> list[SprayRecord]:
+    rows = list(
+        (
+            await db.execute(
+                select(SprayRecord).where(SprayRecord.program_id == program_id)
+            )
+        ).scalars().all()
+    )
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Spray program not found")
+    return rows
+
+
+@router.patch("/programs/{program_id}/status", response_model=list[SprayOut])
+async def update_program_status(
+    program_id: str,
+    payload: SprayStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    current: Employee = Depends(require_roles("admin", "supervisor")),
+):
+    """Mark a program applied, or review it once the follow-up round is in."""
+    rows = await _program_rows(db, program_id)
+    now = datetime.now(timezone.utc)
+
+    for r in rows:
+        r.program_status = payload.status
+        if payload.status == "applied":
+            r.applied_at = payload.applied_at or now
+            r.applied_by = current.id
+            # Re-marking as applied clears a previous review, otherwise the
+            # record would claim to be reviewed against an older application.
+            r.reviewed_at = None
+            r.reviewed_by = None
+        elif payload.status == "reviewed":
+            if r.applied_at is None:
+                r.applied_at = payload.applied_at or now
+                r.applied_by = r.applied_by or current.id
+            r.reviewed_at = now
+            r.reviewed_by = current.id
+            r.review_comment = payload.review_comment
+            r.effectiveness = payload.effectiveness
+        else:  # back to planned
+            r.applied_at = r.reviewed_at = None
+            r.applied_by = r.reviewed_by = None
+            r.review_comment = r.effectiveness = None
+
+    await db.commit()
+    for r in rows:
+        await db.refresh(r)
+    return [SprayOut.model_validate(r) for r in rows]
+
+
+@router.get("/programs/{program_id}/attachments", response_model=list[SprayAttachmentOut])
+async def list_attachments(
+    program_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(get_current_employee),
+):
+    return (
+        await db.execute(
+            select(SprayAttachment)
+            .where(SprayAttachment.program_id == program_id)
+            .order_by(SprayAttachment.uploaded_at.desc())
+        )
+    ).scalars().all()
+
+
+@router.post(
+    "/programs/{program_id}/attachments",
+    response_model=SprayAttachmentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_attachment(
+    program_id: str,
+    payload: SprayAttachmentCreate,
+    db: AsyncSession = Depends(get_db),
+    current: Employee = Depends(require_roles("admin", "supervisor")),
+):
+    """File a document against a program — typically the signed approval sheet.
+
+    The file itself is uploaded through /media/upload; this records it against
+    the program so the paperwork lives with the application it authorises.
+    """
+    await _program_rows(db, program_id)  # 404 if the program doesn't exist
+    row = SprayAttachment(
+        program_id=program_id,
+        filename=payload.filename,
+        url=payload.url,
+        content_type=payload.content_type,
+        size_bytes=payload.size_bytes,
+        kind=payload.kind,
+        note=payload.note,
+        uploaded_by=current.id,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete(
+    "/programs/{program_id}/attachments/{attachment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_attachment(
+    program_id: str,
+    attachment_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(require_roles("admin", "supervisor")),
+):
+    row = await db.get(SprayAttachment, attachment_id)
+    if row is None or row.program_id != program_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Attachment not found")
+    await db.delete(row)
+    await db.commit()

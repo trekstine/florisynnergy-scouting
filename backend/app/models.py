@@ -343,12 +343,63 @@ class SprayRecord(Base):
     start_time: Mapped[time | None] = mapped_column(Time)
     scout_report_date: Mapped[date | None] = mapped_column(Date)
 
+    # ── Program lifecycle ────────────────────────────────────────────────
+    # A program is planned before it is sprayed, and only reviewed once a
+    # later round has been walked. Held on every row of the program (they
+    # share a program_id) so any single record answers "did this go out?".
+    program_status: Mapped[str] = mapped_column(String(20), default="planned")
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    applied_by: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    # The human read on whether it worked, alongside the engine's own verdict.
+    review_comment: Mapped[str | None] = mapped_column(Text)
+    effectiveness: Mapped[str | None] = mapped_column(String(20))
+
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    __table_args__ = (Index("idx_spray_lookup", "greenhouse_id", "recorded_at"),)
+    __table_args__ = (
+        Index("idx_spray_lookup", "greenhouse_id", "recorded_at"),
+        CheckConstraint(
+            "program_status IN ('planned', 'applied', 'reviewed')",
+            name="ck_spray_program_status",
+        ),
+    )
+
+
+class SprayAttachment(Base):
+    """A document filed against a spray program.
+
+    The point is e-filing: the signed approval sheet comes back from the field
+    as a scan or a photograph, and belongs with the program it authorises
+    rather than in a drawer.
+    """
+
+    __tablename__ = "spray_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    program_id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False), index=True, nullable=False
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(100))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    kind: Mapped[str | None] = mapped_column(String(40))
+    note: Mapped[str | None] = mapped_column(Text)
+    uploaded_by: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 # ───────────────────────────── Agronomy / Action ────────────────────────────
