@@ -2,7 +2,8 @@
 
 import { ArrowLeft, Bug, MapPin, SprayCan } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
 import { PaginationBar, usePagination } from "@/components/Pagination";
 import { Badge, Card, EmptyState, PageHeader, Select, Spinner } from "@/components/ui";
@@ -17,7 +18,18 @@ import { useGreenhouses, useRounds } from "@/lib/hooks";
  * with findings and no spray program is a round still waiting on a decision.
  */
 export default function ScoutingRoundsPage() {
-  const [greenhouse, setGreenhouse] = useState<string>("");
+  // useSearchParams needs a Suspense boundary in the app router.
+  return (
+    <Suspense fallback={null}>
+      <RoundsList />
+    </Suspense>
+  );
+}
+
+function RoundsList() {
+  // Deep links from a spray program arrive pre-filtered to its block.
+  const search = useSearchParams();
+  const [greenhouse, setGreenhouse] = useState<string>(search.get("greenhouse") ?? "");
   const houses = useGreenhouses();
   const q = useRounds({
     greenhouse_id: greenhouse ? Number(greenhouse) : undefined,

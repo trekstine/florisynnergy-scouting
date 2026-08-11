@@ -3,7 +3,6 @@
 import {
   ChevronDown,
   ChevronRight,
-  ClipboardList,
   Download,
   FileCheck2,
   FileText,
@@ -12,6 +11,7 @@ import Link from "next/link";
 import { Fragment, useState } from "react";
 
 import { PaginationBar, usePagination } from "@/components/Pagination";
+import { ScoutingBehindLink } from "@/components/ScoutingBehindLink";
 import { Badge, Card, CardHeader, Spinner } from "@/components/ui";
 import { formatDate, isHazardous, money } from "@/lib/format";
 import { buildSprayCsv, downloadCsv } from "@/lib/sprayExport";
@@ -350,16 +350,11 @@ function ProgramDetail({
             </span>
           )}
         </span>
-        {head.greenhouse_id != null && (
-          <Link
-            href={`/scouting?greenhouse_id=${head.greenhouse_id}${
-              head.scout_report_date ? `&end=${head.scout_report_date}` : ""
-            }`}
-            className="flex items-center gap-1 font-semibold text-brand-700 hover:underline"
-          >
-            <ClipboardList size={13} /> Scouting behind this block
-          </Link>
-        )}
+        <ScoutingBehindLink
+          greenhouseId={head.greenhouse_id}
+          reportDate={head.scout_report_date ?? head.start_date}
+          className="flex items-center gap-1 font-semibold text-brand-700 hover:underline"
+        />
         {head.comments && (
           <span
             className={

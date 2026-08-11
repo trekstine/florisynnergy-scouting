@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 
+import { ScoutingBehindLink } from "@/components/ScoutingBehindLink";
 import { Badge, Button, ErrorBox, Select, Spinner, TextInput } from "@/components/ui";
 import { api, V1 } from "@/lib/client-api";
 import { SCOUTING_LABEL, bedLabel, formatDate, formatDateTime, severityHex } from "@/lib/format";
@@ -455,14 +456,13 @@ function ScoutingBehind({
                   </li>
                 ))}
               </ul>
-              {findings[0]?.batch_id && (
-                <Link
-                  href={`/scouting/rounds/${findings[0].batch_id}`}
-                  className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-700 hover:underline"
-                >
-                  <ClipboardList size={13} /> Open the full scouting report
-                </Link>
-              )}
+              <div className="mt-3">
+                <ScoutingBehindLink
+                  greenhouseId={greenhouseId}
+                  reportDate={upto}
+                  label="Open the full scouting report"
+                />
+              </div>
             </>
           )}
         </div>

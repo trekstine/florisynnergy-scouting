@@ -337,12 +337,15 @@ export const useAgentTrend = (f: Filters = {}) =>
   });
 
 /** Scouting rounds — the unit a farm calls a "scouting report". */
-export const useRounds = (params?: {
-  greenhouse_id?: number;
-  start?: string;
-  end?: string;
-  limit?: number;
-}) => {
+export const useRounds = (
+  /** Pass `null` to hold the query — used when the block is not known yet. */
+  params?: {
+    greenhouse_id?: number;
+    start?: string;
+    end?: string;
+    limit?: number;
+  } | null,
+) => {
   const qs = new URLSearchParams();
   if (params?.greenhouse_id) qs.set("greenhouse_id", String(params.greenhouse_id));
   if (params?.start) qs.set("start", params.start);
@@ -351,6 +354,7 @@ export const useRounds = (params?: {
   const s = qs.toString();
   return useQuery({
     queryKey: ["rounds", s],
+    enabled: params !== null,
     queryFn: () => api.get<RoundSummary[]>(`${V1}/scouting/rounds${s ? `?${s}` : ""}`),
   });
 };
