@@ -48,8 +48,8 @@ export const STATUS_HEX: Record<ProgramStatus, string> = {
  * Everything that happens to a spray program *after* it is created: was it
  * actually applied, did it work, and where is the signed paperwork.
  *
- * Lives inside the expanded program row rather than on its own page, so the
- * program and the scouting behind it can be read on one screen.
+ * Rendered on the program page, so the status, the paperwork and the scouting
+ * that justified the spray are all readable on one screen.
  */
 export function SprayProgramPanel({
   programId,
@@ -408,7 +408,7 @@ function ScoutingBehind({
         <ClipboardList size={15} className="text-ink-faint" />
         <span className="text-sm font-bold text-ink">Scouting behind this block</span>
         <span className="text-xs text-ink-faint">
-          {open ? "" : "opens here, not in a new tab"}
+          {open ? "" : "expands here, no new tab"}
         </span>
       </button>
 

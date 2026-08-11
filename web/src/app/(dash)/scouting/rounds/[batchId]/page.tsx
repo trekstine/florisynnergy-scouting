@@ -139,7 +139,7 @@ export default function ScoutingRoundPage() {
                   </span>
                   <span className="flex shrink-0 items-center gap-3">
                     <Link
-                      href="/spray"
+                      href={`/spray/${encodeURIComponent(p.program_id)}`}
                       className="text-xs font-semibold text-brand-700 hover:underline"
                     >
                       Open program

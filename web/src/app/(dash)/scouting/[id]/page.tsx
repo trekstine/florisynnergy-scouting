@@ -286,13 +286,21 @@ export default function ScoutingDetailPage() {
                             {s.safe_harvest_date ? formatDate(s.safe_harvest_date) : "—"}
                           </td>
                           <td className="px-3 py-2">
-                            <Link
-                              href={`/spray-approval/${encodeURIComponent(programKey(s))}`}
-                              target="_blank"
-                              className="flex items-center gap-1 whitespace-nowrap font-semibold text-brand-700 hover:underline"
-                            >
-                              <FileCheck2 size={12} /> Sheet
-                            </Link>
+                            <span className="flex items-center gap-3">
+                              <Link
+                                href={`/spray/${encodeURIComponent(programKey(s))}`}
+                                className="whitespace-nowrap font-semibold text-brand-700 hover:underline"
+                              >
+                                Program
+                              </Link>
+                              <Link
+                                href={`/spray-approval/${encodeURIComponent(programKey(s))}`}
+                                target="_blank"
+                                className="flex items-center gap-1 whitespace-nowrap font-semibold text-brand-700 hover:underline"
+                              >
+                                <FileCheck2 size={12} /> Sheet
+                              </Link>
+                            </span>
                           </td>
                         </tr>
                       ))}

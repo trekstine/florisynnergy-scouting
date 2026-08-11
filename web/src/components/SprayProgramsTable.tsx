@@ -180,15 +180,25 @@ export function SprayProgramsTable({
                         )}
                       </td>
                       <td className="px-3 py-2.5">
-                        <Link
-                          href={`/spray-approval/${encodeURIComponent(p.program)}`}
-                          target="_blank"
-                          onClick={(e) => e.stopPropagation()}
-                          title="Open the printable approval sheet"
-                          className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-brand-700 hover:underline"
-                        >
-                          <FileCheck2 size={14} /> Approval sheet
-                        </Link>
+                        <span className="flex items-center gap-3">
+                          <Link
+                            href={`/spray/${encodeURIComponent(p.program)}`}
+                            onClick={(e) => e.stopPropagation()}
+                            title="Open the full program"
+                            className="whitespace-nowrap text-xs font-semibold text-brand-700 hover:underline"
+                          >
+                            Program
+                          </Link>
+                          <Link
+                            href={`/spray-approval/${encodeURIComponent(p.program)}`}
+                            target="_blank"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Open the printable approval sheet"
+                            className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-brand-700 hover:underline"
+                          >
+                            <FileCheck2 size={14} /> Sheet
+                          </Link>
+                        </span>
                       </td>
                     </tr>
                     {isOpen && (
