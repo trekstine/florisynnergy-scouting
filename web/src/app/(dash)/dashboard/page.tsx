@@ -615,7 +615,10 @@ export default function DashboardPage() {
               hotBlocks.map((b) => (
                 <div key={b.greenhouse_id}>
                   <div className="flex items-center gap-2.5">
-                    <span className="w-16 shrink-0 truncate text-sm font-medium text-ink">
+                    <span
+                      title={b.name}
+                      className="w-28 shrink-0 truncate text-sm font-medium text-ink"
+                    >
                       {b.name}
                     </span>
                     <div className="h-5 flex-1 overflow-hidden rounded bg-surface">
@@ -637,7 +640,7 @@ export default function DashboardPage() {
                   </div>
                   {/* Names the agent driving the band, rather than a bare number. */}
                   {b.headline && (
-                    <p className="ml-[4.6rem] mt-0.5 truncate text-[11px] text-ink-faint">
+                    <p className="ml-[7.6rem] mt-0.5 truncate text-[11px] text-ink-faint">
                       {b.headline}
                     </p>
                   )}

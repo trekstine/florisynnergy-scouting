@@ -204,6 +204,15 @@ export default function AnalyticsPage() {
     return m;
   }, [greenhouses.data]);
 
+  /** The greenhouse breakdown keys by name, so the leaderboard needs
+   *  name → code to label its rows without truncating every one of them
+   *  to the same "Greenhou…". */
+  const ghCodeByName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of greenhouses.data ?? []) if (g.code) m.set(g.name, g.code);
+    return m;
+  }, [greenhouses.data]);
+
   // ── Reference lookups so the detail table shows names, not raw ids ──
   const pestName = useMemo(() => {
     const m = new Map<number, string>();
@@ -893,8 +902,16 @@ export default function AnalyticsPage() {
                   <div className="space-y-1.5">
                     {ghLeaderboard.map((g) => (
                       <div key={g.key} className="flex items-center gap-3">
-                        <span className="w-20 shrink-0 truncate text-sm font-medium text-ink">
-                          {g.key}
+                        <span
+                          title={g.key}
+                          className="flex w-40 shrink-0 items-baseline gap-1.5 text-sm"
+                        >
+                          <span className="font-semibold text-ink">{g.key}</span>
+                          {ghCodeByName.get(g.key) && (
+                            <span className="text-[11px] text-ink-faint">
+                              {ghCodeByName.get(g.key)}
+                            </span>
+                          )}
                         </span>
                         <div className="h-6 flex-1 overflow-hidden rounded-md bg-surface">
                           <div
