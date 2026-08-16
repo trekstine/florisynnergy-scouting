@@ -69,8 +69,60 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
   and/or take EBS snapshots.
 - **Logs:** `docker compose -f docker-compose.prod.yml logs -f api web`
 
+## Releasing the Credible Blooms app
+
+The app reaches the portal through the Blooms integration, which is closed
+until `INTEGRATION_API_KEY` is set on the server. Both sides must carry the
+same value.
+
+**On the VM** — generate once, then read it back to paste into the app:
+
+```bash
+grep -q '^INTEGRATION_API_KEY=' .env || \
+  echo "INTEGRATION_API_KEY=$(openssl rand -hex 32)" >> .env
+grep '^INTEGRATION_API_KEY=' .env
+docker compose -f docker-compose.prod.yml up -d --build api
+```
+
+Check the link before sending anyone to a greenhouse:
+
+```bash
+curl -s -H "X-App-Key: <the key>" \
+  https://$DOMAIN/api/v1/integrations/blooms/health
+# {"ok":true,"scouting_records":1234}
+```
+
+**In the app** — `credible_blooms/.env`, which is git-ignored:
+
+```
+PORTAL_URL=https://your-portal-host      # no trailing slash
+PORTAL_APP_KEY=<the same key>
+```
+
+Then build. `flutter clean` matters here: `.env` ships as a bundled asset, so
+a stale build can carry the previous key.
+
+```bash
+flutter clean && flutter pub get
+flutter build apk --release          # sideload / direct install
+flutter build appbundle --release    # Play Store
+```
+
+The APK lands at `build/app/outputs/flutter-apk/app-release.apk`.
+
+> **Signing.** There is no `android/key.properties`, so release builds fall
+> back to the debug keystore. Fine for sideloading; the Play Store will reject
+> it. Create a keystore and that file before publishing.
+
+> **The app key is not a secret from a determined user.** It is bundled in the
+> APK and can be extracted. It proves *this is the app* — it is not a substitute
+> for a user login, which is why the integration only accepts scouting ingest
+> and nothing else. Rotate it if a device is lost.
+
 ## Notes / trade-offs
 
 - **Single instance** = simple but no HA. For resilience later: move Postgres to RDS (with the PostGIS extension), run web/api on ECS/Fargate behind an ALB, and keep secrets in SSM Parameter Store / Secrets Manager.
 - `SECRET_KEY` signs the JWTs — rotating it logs everyone out.
+- `INTEGRATION_API_KEY` is shared with the Credible Blooms app; rotating it
+  means rebuilding and redistributing that app.
 - Managed TLS alternative: put an ALB + ACM cert in front instead of Caddy, and drop the caddy service.
