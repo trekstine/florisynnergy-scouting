@@ -136,19 +136,35 @@ export function useCreateBedsBulk() {
   return useMutation({
     mutationFn: ({
       greenhouseId,
-      count,
-      start = 1,
-      prefix = "Bed ",
+      codes,
     }: {
       greenhouseId: number;
-      count: number;
-      start?: number;
-      prefix?: string;
+      /** The exact codes the user was shown, so what is created matches. */
+      codes: string[];
     }) =>
-      api.post<Bed[]>(`${V1}/greenhouses/${greenhouseId}/beds/bulk`, {
-        count,
-        start,
-        prefix,
+      api.post<Bed[]>(`${V1}/greenhouses/${greenhouseId}/beds/bulk`, { codes }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["beds", v.greenhouseId] });
+      qc.invalidateQueries({ queryKey: ["greenhouses"] });
+      qc.invalidateQueries({ queryKey: ["agent-pressure"] });
+    },
+  });
+}
+
+/** Remove a selection of beds, or clear the block. */
+export function useDeleteBeds() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      greenhouseId,
+      bedIds,
+    }: {
+      greenhouseId: number;
+      /** Omit to clear every bed on the block. */
+      bedIds?: number[];
+    }) =>
+      api.delWithBody<{ deleted: number }>(`${V1}/greenhouses/${greenhouseId}/beds`, {
+        bed_ids: bedIds ?? null,
       }),
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ["beds", v.greenhouseId] });

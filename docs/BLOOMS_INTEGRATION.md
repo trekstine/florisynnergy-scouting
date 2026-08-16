@@ -26,6 +26,7 @@ All under `/api/v1/integrations/blooms`, guarded by an `X-App-Key` header.
 | --- | --- | --- |
 | `POST` | `/session` | One scouting walk in, stored as one round. Returns the batch id, records accepted, recommendations raised, and any name that could not be placed. |
 | `GET` | `/records` | Scouting records in the Blooms JSON shape. `days`, `limit`, `greenhouse_id`. |
+| `POST` | `/media` | A scouting photo into the portal's own store. Returns a relative `/media/...` url. |
 | `GET` | `/health` | Cheap check that the URL and key are both good. |
 
 Admin-only, behind a normal portal token (not the app key):
@@ -90,3 +91,15 @@ observation can raise a recommendation and a later round can close it.
 Records arrive with `verification_method = "manual"`. Blooms captures no GPS
 fix or QR scan, and claiming otherwise would corrupt the verification stats the
 portal reports on.
+
+## Photos
+
+Photos go to `POST /media` and are stored by the portal, which returns a
+`/media/...` url. Previously the app kept them in its Firebase bucket and sent
+the storage *path* as the image url — the portal could not resolve that, so
+every attachment arrived broken. A scouting record is evidence; its picture has
+to live where the record lives.
+
+Firebase remains a fallback: if the portal is unreachable the photo still
+uploads there and the scout is told, so a flaky connection never blocks a
+capture.

@@ -19,8 +19,17 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +55,7 @@ from ..schemas import (
     BloomsSession,
     UnmatchedName,
 )
+from ..routers.media import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, MEDIA_DIR
 from ..services.matching import ReferenceResolver, Resolution, normalise
 from ..services.recommendations import evaluate_entry, evaluate_outcome
 
@@ -315,6 +325,48 @@ def _to_record(
         verification_method="manual",
         recorded_at=recorded_at,
     )
+
+
+@router.post("/media", status_code=status.HTTP_201_CREATED)
+async def upload_media(
+    file: UploadFile,
+    _: str = Depends(require_app_key),
+) -> dict[str, str]:
+    """Take a scouting photo from the partner app into the portal's own store.
+
+    The app previously kept photos in its Firebase bucket and sent the storage
+    path as the image url. The portal cannot resolve that — it is not a URL,
+    and it belongs to another system's lifecycle. For a record that is meant to
+    be evidence, the picture has to live where the record lives.
+
+    Returns the same relative ``/media/...`` url the mobile app gets, so the
+    portal and both apps all resolve images the same way.
+    """
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            f"Unsupported file type '{suffix}'. Allowed: {sorted(ALLOWED_EXTENSIONS)}",
+        )
+
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid.uuid4().hex}{suffix}"
+    destination = MEDIA_DIR / filename
+
+    size = 0
+    with destination.open("wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                out.close()
+                destination.unlink(missing_ok=True)
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    "Image too large (max 15 MB).",
+                )
+            out.write(chunk)
+
+    return {"url": f"/media/{filename}"}
 
 
 @router.get("/records", response_model=list[BloomsRecord])

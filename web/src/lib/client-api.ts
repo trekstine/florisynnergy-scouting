@@ -51,6 +51,9 @@ export const api = {
   patch: <T>(p: string, body?: unknown) =>
     request<T>(p, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
   del: <T>(p: string) => request<T>(p, { method: "DELETE" }),
+  /** DELETE carrying a body — used where one call removes a selection. */
+  delWithBody: <T>(p: string, body?: unknown) =>
+    request<T>(p, { method: "DELETE", body: body ? JSON.stringify(body) : undefined }),
   /** Multipart upload — the browser sets the boundary. */
   upload: <T>(p: string, form: FormData) =>
     request<T>(p, { method: "POST", body: form }),

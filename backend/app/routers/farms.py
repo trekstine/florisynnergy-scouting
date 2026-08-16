@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..deps import get_current_employee, require_roles
 from ..geo import coords_to_geometry, geometry_to_coords
-from ..models import Bed, Farm, Greenhouse
+from ..models import Bed, Farm, Greenhouse, ScoutingRecord
 from ..schemas import (
     BedBulkCreate,
+    BedBulkDelete,
     BedCreate,
     BedOut,
     FarmCreate,
@@ -137,7 +138,7 @@ async def delete_greenhouse(
 
 
 # ── Beds ──
-def _bed_out(b: Bed) -> BedOut:
+def _bed_out(b: Bed, records: int = 0) -> BedOut:
     return BedOut(
         id=b.id,
         greenhouse_id=b.greenhouse_id,
@@ -145,7 +146,27 @@ def _bed_out(b: Bed) -> BedOut:
         boundary=geometry_to_coords(b.boundary) if b.boundary is not None else None,
         centroid_lat=b.centroid_lat,
         centroid_lng=b.centroid_lng,
+        records=records,
     )
+
+
+async def _record_counts(db: AsyncSession, greenhouse_id: int) -> dict[str, int]:
+    """Scouting records per bed code on a block, in one query.
+
+    Records reference a bed by code rather than by id — a scout's phone knows
+    "Bed 7", not a primary key — so the count is keyed the same way.
+    """
+    rows = (
+        await db.execute(
+            select(ScoutingRecord.bed_code, func.count())
+            .where(
+                ScoutingRecord.greenhouse_id == greenhouse_id,
+                ScoutingRecord.bed_code.isnot(None),
+            )
+            .group_by(ScoutingRecord.bed_code)
+        )
+    ).all()
+    return {code: int(n) for code, n in rows}
 
 
 @gh_router.get("/{greenhouse_id}/beds", response_model=list[BedOut])
@@ -159,7 +180,8 @@ async def list_beds(
             select(Bed).where(Bed.greenhouse_id == greenhouse_id).order_by(Bed.code)
         )
     ).scalars().all()
-    return [_bed_out(b) for b in rows]
+    counts = await _record_counts(db, greenhouse_id)
+    return [_bed_out(b, counts.get(b.code, 0)) for b in rows]
 
 
 @gh_router.post(
@@ -230,11 +252,23 @@ async def create_beds_bulk(
         ).scalars().all()
     )
 
+    # An explicit list wins: the client showed the user these exact codes, and
+    # creating anything else would make the preview a lie.
+    if payload.codes:
+        wanted = [c.strip() for c in payload.codes if c and c.strip()][:200]
+    else:
+        wanted = [
+            f"{payload.prefix}{n}".strip()
+            for n in range(payload.start, payload.start + payload.count)
+        ]
+
     created: list[Bed] = []
-    for n in range(payload.start, payload.start + payload.count):
-        code = f"{payload.prefix}{n}".strip()
-        if code in existing:
-            continue  # idempotent — topping a block up from 12 to 20 is safe
+    seen: set[str] = set()
+    for code in wanted:
+        # Idempotent — topping a block up from 12 to 20 is safe.
+        if code in existing or code in seen:
+            continue
+        seen.add(code)
         bed = Bed(greenhouse_id=greenhouse_id, code=code)
         db.add(bed)
         created.append(bed)
@@ -249,6 +283,34 @@ async def create_beds_bulk(
     for b in created:
         await db.refresh(b)
     return [_bed_out(b) for b in created]
+
+
+@gh_router.delete("/{greenhouse_id}/beds", status_code=status.HTTP_200_OK)
+async def delete_beds_bulk(
+    greenhouse_id: int,
+    payload: BedBulkDelete,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_roles("admin", "supervisor")),
+) -> dict[str, int]:
+    """Remove a selection of beds, or clear the block.
+
+    Generating a run of twenty beds under the wrong naming and then having to
+    delete them one at a time is the thing that made this screen painful.
+    """
+    if await db.get(Greenhouse, greenhouse_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Greenhouse not found")
+
+    q = select(Bed).where(Bed.greenhouse_id == greenhouse_id)
+    if payload.bed_ids is not None:
+        if not payload.bed_ids:
+            return {"deleted": 0}
+        q = q.where(Bed.id.in_(payload.bed_ids))
+
+    beds = list((await db.execute(q)).scalars().all())
+    for bed in beds:
+        await db.delete(bed)
+    await db.commit()
+    return {"deleted": len(beds)}
 
 
 @gh_router.delete(

@@ -98,9 +98,16 @@ class BedCreate(BaseModel):
 
 
 class BedBulkCreate(BaseModel):
-    """Generate "Bed 1" … "Bed N" in one call — blocks run to 20+ beds."""
+    """Register a run of beds in one call — blocks run to 20+ beds.
 
-    count: int = Field(ge=1, le=200)
+    Either send the exact ``codes`` — which lets a client show a preview that
+    is guaranteed to match what gets created, including naming that is not
+    ``prefix + number`` like "Bed A" — or send count/start/prefix and let the
+    server generate them.
+    """
+
+    codes: list[str] | None = None
+    count: int = Field(default=1, ge=1, le=200)
     start: int = 1
     prefix: str = Field(default="Bed ", max_length=30)
 
@@ -112,6 +119,17 @@ class BedOut(BaseModel):
     boundary: list[Coordinate] | None = None
     centroid_lat: float | None
     centroid_lng: float | None
+    # Scouting records that name this bed. Removing a bed that scouts have
+    # walked orphans history, so the count travels with the bed and the UI
+    # can say what is at stake before anyone clicks.
+    records: int = 0
+
+
+class BedBulkDelete(BaseModel):
+    """Remove several beds at once — the fix for a run generated wrongly."""
+
+    # Omit to clear every bed on the block.
+    bed_ids: list[int] | None = None
 
 
 # ───────── Reference data ─────────

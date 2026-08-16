@@ -39,6 +39,8 @@ export interface Bed {
   boundary: Coordinate[] | null;
   centroid_lat: number | null;
   centroid_lng: number | null;
+  /** Scouting records naming this bed — what is lost if it is removed. */
+  records: number;
 }
 
 export interface Employee {
