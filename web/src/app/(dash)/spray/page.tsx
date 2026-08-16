@@ -327,6 +327,11 @@ export default function SprayPage() {
                         <span className="text-xs text-ink-faint">
                           {p.products.length} product{p.products.length === 1 ? "" : "s"}
                           {p.coverage && ` · ${p.coverage}`}
+                          {p.products[0]?.type_of_application &&
+                            ` · ${p.products[0].type_of_application}`}
+                          {p.products[0]?.volume_of_water &&
+                            ` · ${p.products[0].volume_of_water}`}
+                          {p.varietyCode && ` · ${p.varietyCode}`}
                         </span>
                       </td>
                       <td className="px-3 py-3">

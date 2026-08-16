@@ -291,6 +291,7 @@ function ProgramDetail({
               <th className="px-3 py-2 text-right font-semibold">Qty</th>
               <th className="px-3 py-2 text-right font-semibold">Unit price</th>
               <th className="px-3 py-2 text-right font-semibold">Cost</th>
+              <th className="px-3 py-2 text-right font-semibold">REI</th>
               <th className="px-3 py-2 font-semibold">PHI</th>
             </tr>
           </thead>
@@ -298,7 +299,11 @@ function ProgramDetail({
             {p.records.map((r) => (
               <tr key={r.id}>
                 <td className="px-3 py-2 font-semibold text-ink">{r.product ?? "—"}</td>
-                <td className="px-3 py-2 text-ink-soft">{r.active_ingredient1 ?? "—"}</td>
+                <td className="px-3 py-2 text-ink-soft">
+                  {[r.active_ingredient1, r.active_ingredient2]
+                    .filter(Boolean)
+                    .join(" + ") || "—"}
+                </td>
                 <td className="px-3 py-2 text-ink-soft">
                   {[r.target1, r.target2].filter(Boolean).join(", ") || "—"}
                 </td>
@@ -322,12 +327,28 @@ function ProgramDetail({
                 <td className="px-3 py-2 text-right font-semibold tabular-nums">
                   {r.cost_of_chemical != null ? money(r.cost_of_chemical) : "—"}
                 </td>
+                <td className="px-3 py-2 text-right tabular-nums text-ink-soft">
+                  {r.rei ? `${r.rei}h` : "—"}
+                </td>
                 <td className="whitespace-nowrap px-3 py-2 text-ink-faint">
                   {r.phi_days != null ? `${r.phi_days}d → ${dt(r.safe_harvest_date)}` : "—"}
                 </td>
               </tr>
             ))}
           </tbody>
+          {/* The total is what gets approved, so it belongs under the column
+              it totals rather than only in the collapsed row. */}
+          <tfoot>
+            <tr className="border-t border-line bg-surface">
+              <td colSpan={8} className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                {p.records.length} product{p.records.length === 1 ? "" : "s"} · total
+              </td>
+              <td className="px-3 py-2 text-right font-bold tabular-nums text-ink">
+                {money(p.totalCost)}
+              </td>
+              <td colSpan={2} />
+            </tr>
+          </tfoot>
         </table>
       </div>
 

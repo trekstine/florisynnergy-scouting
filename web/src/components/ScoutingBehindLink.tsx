@@ -2,8 +2,9 @@
 
 import { ClipboardList } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
+import { RoundDrawer } from "@/components/RoundDrawer";
 import { useRounds } from "@/lib/hooks";
 import type { RoundSummary } from "@/lib/types";
 
@@ -38,17 +39,40 @@ export function ScoutingBehindLink({
 }) {
   const q = useRounds(greenhouseId != null ? { greenhouse_id: greenhouseId, limit: 100 } : null);
   const round = useMemo(() => pickRound(q.data ?? [], reportDate), [q.data, reportDate]);
+  const [open, setOpen] = useState(false);
 
   if (greenhouseId == null) return null;
 
-  // Until the round resolves, fall back to the reports list filtered to this
-  // block — still the right place, just one click further from the answer.
-  const href = round
-    ? `/scouting/rounds/${encodeURIComponent(round.batch_id)}`
-    : `/scouting/rounds?greenhouse=${greenhouseId}`;
+  // Checking the scouting behind a spray is a glance, not a destination — it
+  // opens over the program rather than navigating away from it, so the tank
+  // mix, the filters and the scroll position all survive the trip.
+  if (round) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={(e) => {
+            // The analytics table toggles a program on row click; opening the
+            // drawer must not also collapse the row underneath it.
+            e.stopPropagation();
+            setOpen(true);
+          }}
+          className={className}
+        >
+          <ClipboardList size={13} /> {label}
+        </button>
+        <RoundDrawer
+          batchId={open ? round.batch_id : null}
+          onClose={() => setOpen(false)}
+        />
+      </>
+    );
+  }
 
+  // No round resolved yet: the reports list filtered to this block is still
+  // the right place, just one click further from the answer.
   return (
-    <Link href={href} className={className}>
+    <Link href={`/scouting/rounds?greenhouse=${greenhouseId}`} className={className}>
       <ClipboardList size={13} /> {label}
     </Link>
   );

@@ -460,7 +460,7 @@ async def seed_if_empty(db: AsyncSession) -> bool:
                     bed_code=bed_code,
                     partition_no=rng.choice(["A", "B", None]),
                     variety_code=variety_code,
-                    coverage=rng.choice(["Full Cover", "Top Cover"]),
+                    coverage=rng.choice(["Full Cover", "Top Cover", "Spot Cover"]),
                     comments=note,
                     start_date=applied_at.date(),
                     start_time=applied_at.time().replace(microsecond=0),

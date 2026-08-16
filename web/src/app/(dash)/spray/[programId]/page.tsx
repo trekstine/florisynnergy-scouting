@@ -265,8 +265,10 @@ export default function SprayProgramPage() {
                   <th className="px-3 py-2.5 font-semibold">RAC</th>
                   <th className="px-3 py-2.5 font-semibold">Rate</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Qty</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Unit price</th>
                   <th className="px-3 py-2.5 text-right font-semibold">REI</th>
                   <th className="px-3 py-2.5 text-right font-semibold">PHI</th>
+                  <th className="px-3 py-2.5 font-semibold">Safe to cut</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Cost</th>
                 </tr>
               </thead>
@@ -297,10 +299,16 @@ export default function SprayProgramPage() {
                       {r.qty ?? "—"}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
+                      {r.buying_price != null ? money(r.buying_price) : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
                       {r.rei ? `${r.rei}h` : "—"}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
                       {r.phi_days != null ? `${r.phi_days}d` : "—"}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-ink-faint">
+                      {r.safe_harvest_date ? formatDate(r.safe_harvest_date) : "—"}
                     </td>
                     <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-ink">
                       {money(r.cost_of_chemical)}
@@ -310,7 +318,7 @@ export default function SprayProgramPage() {
               </tbody>
               <tfoot>
                 <tr className="border-t border-line bg-surface">
-                  <td colSpan={9} className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                  <td colSpan={11} className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-ink-faint">
                     Total
                   </td>
                   <td className="px-3 py-2.5 text-right font-bold tabular-nums text-ink">

@@ -27,7 +27,7 @@ import {
 } from "@/lib/hooks";
 import type { ComplianceIssue, SprayPreview, SprayRecord } from "@/lib/types";
 
-const COVERAGES = ["Full Cover", "Top Cover"];
+const COVERAGES = ["Full Cover", "Top Cover", "Spot Cover"];
 const APPLICATION_TYPES = [
   "Foliar",
   "Drench",
