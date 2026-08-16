@@ -351,18 +351,31 @@ export const useAgentTrend = (f: Filters = {}) =>
       api.get<AgentTrendPoint[]>(`${V1}/analytics/agent-trend${filterQS(f)}`),
   });
 
+/** What narrows the reports list. Shared with the CSV export so both agree. */
+export interface RoundFilters {
+  greenhouse_id?: number;
+  pest_id?: number;
+  disease_id?: number;
+  variety_code?: string;
+  scout_id?: number;
+  min_severity?: number;
+  start?: string;
+  end?: string;
+  limit?: number;
+}
+
 /** Scouting rounds — the unit a farm calls a "scouting report". */
 export const useRounds = (
   /** Pass `null` to hold the query — used when the block is not known yet. */
-  params?: {
-    greenhouse_id?: number;
-    start?: string;
-    end?: string;
-    limit?: number;
-  } | null,
+  params?: RoundFilters | null,
 ) => {
   const qs = new URLSearchParams();
   if (params?.greenhouse_id) qs.set("greenhouse_id", String(params.greenhouse_id));
+  if (params?.pest_id) qs.set("pest_id", String(params.pest_id));
+  if (params?.disease_id) qs.set("disease_id", String(params.disease_id));
+  if (params?.variety_code) qs.set("variety_code", params.variety_code);
+  if (params?.scout_id) qs.set("scout_id", String(params.scout_id));
+  if (params?.min_severity) qs.set("min_severity", String(params.min_severity));
   if (params?.start) qs.set("start", params.start);
   if (params?.end) qs.set("end", params.end);
   if (params?.limit) qs.set("limit", String(params.limit));

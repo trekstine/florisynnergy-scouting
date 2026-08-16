@@ -1,22 +1,44 @@
 "use client";
 
-import { ArrowLeft, Bug, MapPin, SprayCan } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Bug,
+  Camera,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Download,
+  Leaf,
+  MapPin,
+  ShieldCheck,
+  SprayCan,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 
-import { Badge, Card, EmptyState, PageHeader, Select, Spinner } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, PageHeader, Select, Spinner } from "@/components/ui";
 import { formatDate, severityHex } from "@/lib/format";
-import { useGreenhouses, useRounds } from "@/lib/hooks";
+import {
+  useDiseases,
+  useEmployees,
+  useGreenhouses,
+  usePests,
+  useRounds,
+  useVarieties,
+} from "@/lib/hooks";
+import { downloadRoundsCsv } from "@/lib/roundExport";
 import type { RoundSummary } from "@/lib/types";
 
 /**
- * Scouting reports — what was walked, when, and what came of it.
+ * Scouting reports — what was walked, when, what was found, and what came of it.
  *
- * A manager arrives at this page with a question shaped like "what did we find
- * yesterday, and in which block?". So the rounds are grouped by the day they
- * were walked, newest first, with each day's totals on the header — you can
- * answer that question without opening anything.
+ * A manager arrives with a question shaped like "what did we find yesterday,
+ * and where" — so rounds are grouped by the day they were walked, with each
+ * day's totals on a header you can collapse. The filters answer the second
+ * question they always ask: "show me only the mildew rounds".
  */
 export default function ScoutingRoundsPage() {
   // useSearchParams needs a Suspense boundary in the app router.
@@ -46,21 +68,37 @@ function dayStart(daysAgo: number): Date {
 function RoundsList() {
   // Deep links from a spray program arrive pre-filtered to its block.
   const search = useSearchParams();
-  const [greenhouse, setGreenhouse] = useState<string>(search.get("greenhouse") ?? "");
-  const [range, setRange] = useState<string>(search.get("range") ?? "7");
+  const [greenhouse, setGreenhouse] = useState(search.get("greenhouse") ?? "");
+  const [pest, setPest] = useState("");
+  const [disease, setDisease] = useState("");
+  const [variety, setVariety] = useState("");
+  const [scout, setScout] = useState("");
+  const [minSeverity, setMinSeverity] = useState("");
+  const [range, setRange] = useState(search.get("range") ?? "7");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
   const houses = useGreenhouses();
+  const pests = usePests();
+  const diseases = useDiseases();
+  const varieties = useVarieties();
+  const employees = useEmployees();
 
   const q = useRounds({
     greenhouse_id: greenhouse ? Number(greenhouse) : undefined,
+    pest_id: pest ? Number(pest) : undefined,
+    disease_id: disease ? Number(disease) : undefined,
+    variety_code: variety || undefined,
+    scout_id: scout ? Number(scout) : undefined,
+    min_severity: minSeverity ? Number(minSeverity) : undefined,
     limit: 500,
   });
 
   /**
    * Rounds bucketed by the day they were walked.
    *
-   * "Yesterday" is its own bucket rather than a filter, because the question
-   * is usually comparative — yesterday against the day before — and a filter
-   * would throw away the comparison.
+   * "Yesterday" is its own bucket rather than only a filter, because the
+   * question is usually comparative — yesterday against the day before — and
+   * filtering would throw the comparison away.
    */
   const days = useMemo(() => {
     const rows = q.data ?? [];
@@ -94,12 +132,58 @@ function RoundsList() {
         blocks: new Set(rounds.map((r) => r.greenhouse ?? r.greenhouse_id)).size,
         beds: rounds.reduce((s, r) => s + r.beds, 0),
         findings: rounds.reduce((s, r) => s + r.findings, 0),
+        hotspots: rounds.reduce((s, r) => s + r.hotspots, 0),
         worst: rounds.reduce((s, r) => Math.max(s, r.max_severity), 0),
         programs: rounds.reduce((s, r) => s + r.programs, 0),
       }));
   }, [q.data, range]);
 
-  const total = days.reduce((s, d) => s + d.rounds.length, 0);
+  /** Exactly the rows on screen, in the order they appear. */
+  const visible = useMemo(() => days.flatMap((d) => d.rounds), [days]);
+
+  const activeFilters = useMemo(() => {
+    const out: string[] = [];
+    const label = (id: string, list: { id: number; name: string }[]) =>
+      list.find((x) => x.id === Number(id))?.name;
+    if (greenhouse) out.push(`Greenhouse: ${label(greenhouse, houses.data ?? []) ?? greenhouse}`);
+    if (pest) out.push(`Pest: ${label(pest, pests.data ?? []) ?? pest}`);
+    if (disease) out.push(`Disease: ${label(disease, diseases.data ?? []) ?? disease}`);
+    if (variety) {
+      const v = (varieties.data ?? []).find((x) => x.code === variety);
+      out.push(`Variety: ${v ? `${v.name} (${v.code})` : variety}`);
+    }
+    if (scout) out.push(`Scout: ${label(scout, employees.data ?? []) ?? scout}`);
+    if (minSeverity) out.push(`Severity ${minSeverity}+`);
+    out.push(RANGES.find((r) => r.id === range)?.label ?? "All");
+    return out;
+  }, [
+    greenhouse, pest, disease, variety, scout, minSeverity, range,
+    houses.data, pests.data, diseases.data, varieties.data, employees.data,
+  ]);
+
+  const filtered =
+    !!greenhouse || !!pest || !!disease || !!variety || !!scout || !!minSeverity;
+
+  function clearFilters() {
+    setGreenhouse("");
+    setPest("");
+    setDisease("");
+    setVariety("");
+    setScout("");
+    setMinSeverity("");
+  }
+
+  function toggleDay(key: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const total = visible.length;
+  const allCollapsed = days.length > 0 && days.every((d) => collapsed.has(d.key));
 
   return (
     <div className="space-y-5 pb-10">
@@ -108,14 +192,14 @@ function RoundsList() {
         subtitle="Grouped by the day they were walked, newest first"
         actions={
           <div className="flex items-center gap-2">
-            <Select value={greenhouse} onChange={(e) => setGreenhouse(e.target.value)}>
-              <option value="">All greenhouses</option>
-              {(houses.data ?? []).map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </Select>
+            <Button
+              variant="outline"
+              onClick={() => downloadRoundsCsv(visible, activeFilters)}
+              disabled={!total}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+              {total > 0 && ` (${total})`}
+            </Button>
             <Link
               href="/scouting"
               className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink-soft transition-colors hover:bg-surface hover:text-ink"
@@ -126,26 +210,114 @@ function RoundsList() {
         }
       />
 
-      {/* Range chips — "what happened yesterday" in one click. */}
-      <div className="flex flex-wrap items-center gap-1.5 px-6">
-        {RANGES.map((r) => (
-          <button
-            key={r.id}
-            onClick={() => setRange(r.id)}
-            className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${
-              range === r.id
-                ? "border-brand-600 bg-brand-50 text-brand-700"
-                : "border-line text-ink-soft hover:bg-surface hover:text-ink"
-            }`}
-          >
-            {r.label}
-          </button>
-        ))}
-        <span className="ml-auto text-xs text-ink-faint">
-          {total} report{total === 1 ? "" : "s"}
-        </span>
+      {/* ── Filters ── */}
+      <div className="px-6">
+        <Card className="p-4">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+            <Filter label="Greenhouse">
+              <Select value={greenhouse} onChange={(e) => setGreenhouse(e.target.value)}>
+                <option value="">All greenhouses</option>
+                {(houses.data ?? []).map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Filter>
+            <Filter label="Pest">
+              <Select value={pest} onChange={(e) => setPest(e.target.value)}>
+                <option value="">Any pest</option>
+                {(pests.data ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            </Filter>
+            <Filter label="Disease">
+              <Select value={disease} onChange={(e) => setDisease(e.target.value)}>
+                <option value="">Any disease</option>
+                {(diseases.data ?? []).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </Select>
+            </Filter>
+            <Filter label="Variety">
+              <Select value={variety} onChange={(e) => setVariety(e.target.value)}>
+                <option value="">Any variety</option>
+                {(varieties.data ?? []).map((v) => (
+                  <option key={v.code} value={v.code}>
+                    {v.name}
+                  </option>
+                ))}
+              </Select>
+            </Filter>
+            <Filter label="Scout">
+              <Select value={scout} onChange={(e) => setScout(e.target.value)}>
+                <option value="">Any scout</option>
+                {(employees.data ?? []).map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </Select>
+            </Filter>
+            <Filter label="Severity at least">
+              <Select value={minSeverity} onChange={(e) => setMinSeverity(e.target.value)}>
+                <option value="">Any severity</option>
+                <option value="1">1 — anything found</option>
+                <option value="3">3 — worth watching</option>
+                <option value="4">4 — hotspot</option>
+                <option value="5">5 — severe</option>
+              </Select>
+            </Filter>
+          </div>
+
+          {/* Range chips — "what happened yesterday" in one click. */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
+            {RANGES.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setRange(r.id)}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${
+                  range === r.id
+                    ? "border-brand-600 bg-brand-50 text-brand-700"
+                    : "border-line text-ink-soft hover:bg-surface hover:text-ink"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+            {filtered && (
+              <button
+                onClick={clearFilters}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-ink-faint hover:bg-surface hover:text-ink"
+              >
+                <X size={13} /> Clear filters
+              </button>
+            )}
+            <span className="ml-auto flex items-center gap-3">
+              {days.length > 0 && (
+                <button
+                  onClick={() =>
+                    setCollapsed(allCollapsed ? new Set() : new Set(days.map((d) => d.key)))
+                  }
+                  className="text-xs font-semibold text-brand-700 hover:underline"
+                >
+                  {allCollapsed ? "Expand all" : "Collapse all"}
+                </button>
+              )}
+              <span className="text-xs text-ink-faint">
+                {total} report{total === 1 ? "" : "s"}
+              </span>
+            </span>
+          </div>
+        </Card>
       </div>
 
+      {/* ── The rounds ── */}
       <div className="space-y-4 px-6">
         {q.isLoading ? (
           <Card>
@@ -156,105 +328,218 @@ function RoundsList() {
         ) : days.length === 0 ? (
           <Card>
             <EmptyState>
-              No scouting rounds in this window.
-              {range !== "" && " Try a wider range."}
+              No scouting rounds match.{" "}
+              {filtered ? "Try clearing a filter." : "Try a wider date range."}
             </EmptyState>
           </Card>
         ) : (
-          days.map((day) => (
-            <Card key={day.key}>
-              {/* The day header answers the question on its own. */}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line bg-surface px-5 py-3">
-                <h3 className="text-sm font-bold text-ink">{day.label}</h3>
-                <span className="text-xs text-ink-faint">
-                  {day.rounds.length} report{day.rounds.length === 1 ? "" : "s"} ·{" "}
-                  {day.blocks} block{day.blocks === 1 ? "" : "s"} · {day.beds} beds
-                </span>
-                <span className="ml-auto flex flex-wrap items-center gap-2">
-                  {day.findings > 0 ? (
-                    <span className="flex items-center gap-1 text-xs font-semibold text-ink-soft">
-                      <Bug size={12} className="text-ink-faint" />
-                      {day.findings} finding{day.findings === 1 ? "" : "s"}
-                    </span>
+          days.map((day) => {
+            const isShut = collapsed.has(day.key);
+            return (
+              <Card key={day.key}>
+                {/* The day header answers the question on its own. */}
+                <button
+                  onClick={() => toggleDay(day.key)}
+                  className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 border-b border-line bg-surface px-5 py-3 text-left transition-colors hover:bg-line/40"
+                >
+                  {isShut ? (
+                    <ChevronRight size={15} className="shrink-0 text-ink-faint" />
                   ) : (
-                    <span className="text-xs font-semibold text-emerald-700">
-                      All clean
-                    </span>
+                    <ChevronDown size={15} className="shrink-0 text-ink-faint" />
                   )}
-                  {day.worst > 0 && (
-                    <span
-                      className="rounded px-1.5 py-0.5 text-xs font-bold text-white"
-                      style={{ backgroundColor: severityHex(day.worst) }}
-                      title="Worst severity seen that day"
-                    >
-                      {day.worst}
-                    </span>
-                  )}
-                  {day.programs > 0 && (
-                    <Badge color="#0891b2">
-                      <SprayCan size={11} /> {day.programs}
-                    </Badge>
-                  )}
-                </span>
-              </div>
+                  <h3 className="text-sm font-bold text-ink">{day.label}</h3>
+                  <span className="text-xs text-ink-faint">
+                    {day.rounds.length} report{day.rounds.length === 1 ? "" : "s"} ·{" "}
+                    {day.blocks} block{day.blocks === 1 ? "" : "s"} · {day.beds} beds
+                  </span>
+                  <span className="ml-auto flex flex-wrap items-center gap-2">
+                    {day.findings > 0 ? (
+                      <span className="flex items-center gap-1 text-xs font-semibold text-ink-soft">
+                        <Bug size={12} className="text-ink-faint" />
+                        {day.findings} finding{day.findings === 1 ? "" : "s"}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-semibold text-emerald-700">All clean</span>
+                    )}
+                    {day.hotspots > 0 && (
+                      <Badge color="#dc2626">
+                        <AlertTriangle size={11} /> {day.hotspots} hotspot
+                        {day.hotspots === 1 ? "" : "s"}
+                      </Badge>
+                    )}
+                    {day.worst > 0 && (
+                      <span
+                        className="rounded px-1.5 py-0.5 text-xs font-bold text-white"
+                        style={{ backgroundColor: severityHex(day.worst) }}
+                        title="Worst severity seen that day"
+                      >
+                        {day.worst}
+                      </span>
+                    )}
+                    {day.programs > 0 && (
+                      <Badge color="#0891b2">
+                        <SprayCan size={11} /> {day.programs}
+                      </Badge>
+                    )}
+                  </span>
+                </button>
 
-              <ul className="divide-y divide-line">
-                {day.rounds.map((r) => (
-                  <li key={r.batch_id}>
-                    <Link
-                      href={`/scouting/rounds/${encodeURIComponent(r.batch_id)}`}
-                      className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 transition-colors hover:bg-surface"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold text-ink">
-                            {r.greenhouse ?? "Unknown block"}
-                          </span>
-                          {r.max_severity > 0 && (
-                            <span
-                              className="rounded px-1.5 py-0.5 text-[11px] font-bold text-white"
-                              style={{ backgroundColor: severityHex(r.max_severity) }}
-                            >
-                              {r.max_severity}
+                {!isShut && (
+                  <ul className="divide-y divide-line">
+                    {day.rounds.map((r) => (
+                      <li key={r.batch_id}>
+                        <Link
+                          href={`/scouting/rounds/${encodeURIComponent(r.batch_id)}`}
+                          className="block px-5 py-3.5 transition-colors hover:bg-surface"
+                        >
+                          {/* Line 1 — where, how bad, what came of it. */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-ink">
+                              {r.greenhouse ?? "Unknown block"}
                             </span>
+                            {r.greenhouse_code && (
+                              <span className="text-[11px] text-ink-faint">
+                                {r.greenhouse_code}
+                              </span>
+                            )}
+                            {r.max_severity > 0 && (
+                              <span
+                                className="rounded px-1.5 py-0.5 text-[11px] font-bold text-white"
+                                style={{ backgroundColor: severityHex(r.max_severity) }}
+                                title="Worst severity in this round"
+                              >
+                                {r.max_severity}
+                              </span>
+                            )}
+                            {r.hotspots > 0 && (
+                              <Badge color="#dc2626">
+                                <AlertTriangle size={11} /> {r.hotspots} hotspot
+                                {r.hotspots === 1 ? "" : "s"}
+                              </Badge>
+                            )}
+                            {r.programs > 0 ? (
+                              <Badge color="#0891b2">
+                                <SprayCan size={11} /> {r.programs} program
+                                {r.programs === 1 ? "" : "s"}
+                              </Badge>
+                            ) : r.findings > 0 ? (
+                              <Badge color="#d97706">No program yet</Badge>
+                            ) : null}
+                            {r.flagged > 0 && (
+                              <Badge color="#b45309">{r.flagged} flagged</Badge>
+                            )}
+                          </div>
+
+                          {/* Line 2 — the counts a manager scans. */}
+                          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-soft">
+                            <Stat icon={<MapPin size={11} />} title="Beds walked">
+                              {r.beds} bed{r.beds === 1 ? "" : "s"}
+                              {r.clean_beds > 0 && (
+                                <span className="text-ink-faint">
+                                  {" "}
+                                  · {r.clean_beds} clean
+                                </span>
+                              )}
+                            </Stat>
+                            <Stat icon={<Bug size={11} />} title="Findings">
+                              {r.findings} of {r.records}
+                            </Stat>
+                            {r.beneficials > 0 && (
+                              <Stat icon={<ShieldCheck size={11} />} title="Beneficials counted">
+                                {r.beneficials} beneficials
+                              </Stat>
+                            )}
+                            {r.photos > 0 && (
+                              <Stat icon={<Camera size={11} />} title="Field photos">
+                                {r.photos}
+                              </Stat>
+                            )}
+                            <Stat icon={<Clock size={11} />} title="Time in the block">
+                              {new Date(r.started_at).toLocaleTimeString("en-GB", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                              {r.duration_minutes > 0 && ` · ${r.duration_minutes} min`}
+                            </Stat>
+                            <span className="text-ink-faint">{r.scout ?? "Unknown scout"}</span>
+                          </div>
+
+                          {/* Line 3 — what was actually seen. */}
+                          {(r.pests.length > 0 ||
+                            r.diseases.length > 0 ||
+                            r.varieties.length > 0) && (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                              {r.pests.map((n) => (
+                                <span
+                                  key={`p-${n}`}
+                                  className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+                                >
+                                  {n}
+                                </span>
+                              ))}
+                              {r.diseases.map((n) => (
+                                <span
+                                  key={`d-${n}`}
+                                  className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-800"
+                                >
+                                  {n}
+                                </span>
+                              ))}
+                              {r.varieties.map((v) => (
+                                <span
+                                  key={`v-${v}`}
+                                  className="flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-ink-faint"
+                                >
+                                  <Leaf size={10} /> {v}
+                                </span>
+                              ))}
+                            </div>
                           )}
-                          {r.programs > 0 ? (
-                            <Badge color="#0891b2">
-                              <SprayCan size={11} /> {r.programs} program
-                              {r.programs === 1 ? "" : "s"}
-                            </Badge>
-                          ) : r.findings > 0 ? (
-                            <Badge color="#d97706">No program yet</Badge>
-                          ) : null}
-                        </span>
-                        <span className="mt-0.5 block truncate text-xs text-ink-faint">
-                          {r.scout ?? "Unknown scout"} ·{" "}
-                          {new Date(r.started_at).toLocaleTimeString("en-GB", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                          {r.agents.length > 0 && ` · ${r.agents.join(", ")}`}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-ink-soft">
-                        <span className="flex items-center gap-1" title="Beds walked">
-                          <MapPin size={12} className="text-ink-faint" />
-                          {r.beds}
-                        </span>
-                        <span className="flex items-center gap-1" title="Findings">
-                          <Bug size={12} className="text-ink-faint" />
-                          {r.findings}
-                        </span>
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          ))
+
+                          {r.session_comment && (
+                            <p className="mt-1.5 truncate text-xs italic text-ink-faint">
+                              &ldquo;{r.session_comment}&rdquo;
+                            </p>
+                          )}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            );
+          })
         )}
       </div>
     </div>
+  );
+}
+
+function Filter({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function Stat({
+  icon,
+  title,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="flex items-center gap-1 tabular-nums" title={title}>
+      <span className="text-ink-faint">{icon}</span>
+      {children}
+    </span>
   );
 }
 

@@ -211,6 +211,15 @@ export interface RoundSummary {
   max_severity: number;
   session_comment: string | null;
   agents: string[];
+  pests: string[];
+  diseases: string[];
+  varieties: string[];
+  clean_beds: number;
+  hotspots: number;
+  beneficials: number;
+  photos: number;
+  flagged: number;
+  duration_minutes: number;
   programs: number;
 }
 

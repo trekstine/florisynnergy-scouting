@@ -495,7 +495,23 @@ class RoundSummary(BaseModel):
     findings: int
     max_severity: int
     session_comment: str | None = None
+    # Every agent named in the round's findings, kept both blended (for a
+    # one-line summary) and split, because a manager filters on one or the
+    # other and a mixed list cannot answer "show me the mildew rounds".
     agents: list[str] = []
+    pests: list[str] = []
+    diseases: list[str] = []
+    varieties: list[str] = []
+    # Beds walked that came back with nothing — the denominator of the
+    # pressure index, and the number that says how thorough the walk was.
+    clean_beds: int = 0
+    # Findings at severity 4+, where the Interplant model says act regardless
+    # of the block average.
+    hotspots: int = 0
+    beneficials: int = 0
+    photos: int = 0
+    flagged: int = 0
+    duration_minutes: int = 0
     programs: int = 0
 
 

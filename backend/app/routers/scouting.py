@@ -194,77 +194,142 @@ async def submit_batch(
 # programs that came out of it.
 
 
-async def _round_summary(db: AsyncSession, batch_id: str) -> RoundSummary:
-    row = (
+async def _summaries(db: AsyncSession, batch_ids: list[str]) -> dict[str, RoundSummary]:
+    """Summarise many rounds in a fixed number of queries.
+
+    The obvious implementation — summarise one round, call it in a loop — costs
+    six queries per round, so a manager opening a month of reports fires two
+    thousand. These aggregate across every requested batch at once, which keeps
+    the page honest whether it is showing five rounds or five hundred.
+    """
+    if not batch_ids:
+        return {}
+
+    scope = ScoutingRecord.batch_id.in_(batch_ids)
+
+    rows = (
         await db.execute(
             select(
+                ScoutingRecord.batch_id,
                 func.min(ScoutingRecord.recorded_at).label("started"),
                 func.max(ScoutingRecord.recorded_at).label("ended"),
                 func.count().label("records"),
                 func.count(func.distinct(ScoutingRecord.bed_code)).label("beds"),
+                func.count().filter(ScoutingRecord.severity > 0).label("findings"),
+                func.count().filter(ScoutingRecord.severity >= 4).label("hotspots"),
                 func.count()
-                .filter(ScoutingRecord.severity > 0)
-                .label("findings"),
+                .filter(ScoutingRecord.image_url.isnot(None))
+                .label("photos"),
+                func.count().filter(ScoutingRecord.flagged.is_(True)).label("flagged"),
                 func.coalesce(func.max(ScoutingRecord.severity), 0).label("max_sev"),
+                func.coalesce(
+                    func.sum(ScoutingRecord.beneficials_count), 0
+                ).label("beneficials"),
                 func.min(ScoutingRecord.greenhouse_id).label("gh"),
                 func.min(ScoutingRecord.scout_id).label("scout"),
-            ).where(ScoutingRecord.batch_id == batch_id)
+                func.max(ScoutingRecord.session_comment).label("comment"),
+                # Beds that produced no finding at all — walked and clean.
+                func.count(func.distinct(ScoutingRecord.bed_code))
+                .filter(ScoutingRecord.severity > 0)
+                .label("dirty_beds"),
+            )
+            .where(scope)
+            .group_by(ScoutingRecord.batch_id)
         )
-    ).one()
-    if not row.records:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scouting round not found")
+    ).all()
 
-    gh = await db.get(Greenhouse, row.gh) if row.gh else None
-    scout = await db.get(Employee, row.scout) if row.scout else None
-    comment = (
+    pests: dict[str, set[str]] = defaultdict(set)
+    for bid, name in (
         await db.execute(
-            select(ScoutingRecord.session_comment)
-            .where(
-                ScoutingRecord.batch_id == batch_id,
-                ScoutingRecord.session_comment.isnot(None),
-            )
-            .limit(1)
+            select(ScoutingRecord.batch_id, Pest.name)
+            .join(Pest, Pest.id == ScoutingRecord.pest_id)
+            .where(scope, ScoutingRecord.severity > 0)
+            .distinct()
         )
-    ).scalar_one_or_none()
+    ).all():
+        pests[bid].add(name)
 
-    agents = [
-        n
-        for (n,) in (
-            await db.execute(
-                select(func.distinct(Pest.name))
-                .select_from(ScoutingRecord)
-                .join(Pest, Pest.id == ScoutingRecord.pest_id)
-                .where(ScoutingRecord.batch_id == batch_id, ScoutingRecord.severity > 0)
-            )
-        ).all()
-    ] + [
-        n
-        for (n,) in (
-            await db.execute(
-                select(func.distinct(Disease.name))
-                .select_from(ScoutingRecord)
-                .join(Disease, Disease.id == ScoutingRecord.disease_id)
-                .where(ScoutingRecord.batch_id == batch_id, ScoutingRecord.severity > 0)
-            )
-        ).all()
-    ]
+    diseases: dict[str, set[str]] = defaultdict(set)
+    for bid, name in (
+        await db.execute(
+            select(ScoutingRecord.batch_id, Disease.name)
+            .join(Disease, Disease.id == ScoutingRecord.disease_id)
+            .where(scope, ScoutingRecord.severity > 0)
+            .distinct()
+        )
+    ).all():
+        diseases[bid].add(name)
 
-    return RoundSummary(
-        batch_id=batch_id,
-        greenhouse_id=row.gh,
-        greenhouse=gh.name if gh else None,
-        greenhouse_code=gh.code if gh else None,
-        scout_id=row.scout,
-        scout=scout.name if scout else None,
-        started_at=row.started,
-        ended_at=row.ended,
-        records=int(row.records),
-        beds=int(row.beds or 0),
-        findings=int(row.findings or 0),
-        max_severity=int(row.max_sev or 0),
-        session_comment=comment,
-        agents=sorted(set(agents)),
-    )
+    # Varieties come off the record's own code, so a round on a block that has
+    # not been mapped to the variety table still reports what was walked.
+    varieties: dict[str, set[str]] = defaultdict(set)
+    for bid, code in (
+        await db.execute(
+            select(ScoutingRecord.batch_id, ScoutingRecord.variety_code)
+            .where(scope, ScoutingRecord.variety_code.isnot(None))
+            .distinct()
+        )
+    ).all():
+        varieties[bid].add(code)
+
+    gh_ids = {r.gh for r in rows if r.gh}
+    houses = {
+        g.id: g
+        for g in (
+            await db.execute(select(Greenhouse).where(Greenhouse.id.in_(gh_ids)))
+        ).scalars()
+        if gh_ids
+    }
+    scout_ids = {r.scout for r in rows if r.scout}
+    scouts = {
+        e.id: e.name
+        for e in (
+            await db.execute(select(Employee).where(Employee.id.in_(scout_ids)))
+        ).scalars()
+        if scout_ids
+    }
+
+    out: dict[str, RoundSummary] = {}
+    for r in rows:
+        gh = houses.get(r.gh)
+        beds = int(r.beds or 0)
+        p = sorted(pests.get(r.batch_id, set()))
+        d = sorted(diseases.get(r.batch_id, set()))
+        out[r.batch_id] = RoundSummary(
+            batch_id=r.batch_id,
+            greenhouse_id=r.gh,
+            greenhouse=gh.name if gh else None,
+            greenhouse_code=gh.code if gh else None,
+            scout_id=r.scout,
+            scout=scouts.get(r.scout),
+            started_at=r.started,
+            ended_at=r.ended,
+            records=int(r.records),
+            beds=beds,
+            findings=int(r.findings or 0),
+            max_severity=int(r.max_sev or 0),
+            session_comment=r.comment,
+            agents=sorted(set(p) | set(d)),
+            pests=p,
+            diseases=d,
+            varieties=sorted(varieties.get(r.batch_id, set())),
+            clean_beds=max(beds - int(r.dirty_beds or 0), 0),
+            hotspots=int(r.hotspots or 0),
+            beneficials=int(r.beneficials or 0),
+            photos=int(r.photos or 0),
+            flagged=int(r.flagged or 0),
+            duration_minutes=max(
+                int((r.ended - r.started).total_seconds() // 60), 0
+            ),
+        )
+    return out
+
+
+async def _round_summary(db: AsyncSession, batch_id: str) -> RoundSummary:
+    summary = (await _summaries(db, [batch_id])).get(batch_id)
+    if summary is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scouting round not found")
+    return summary
 
 
 async def _programs_for(db: AsyncSession, rec_ids: list[int]) -> list[ProgramSummary]:
@@ -319,11 +384,22 @@ async def list_rounds(
     db: AsyncSession = Depends(get_db),
     current: Employee = Depends(get_current_employee),
     greenhouse_id: int | None = Query(default=None),
+    pest_id: int | None = Query(default=None),
+    disease_id: int | None = Query(default=None),
+    variety_code: str | None = Query(default=None),
+    scout_id: int | None = Query(default=None),
+    min_severity: int | None = Query(default=None, ge=0, le=5),
     start: date | None = Query(default=None),
     end: date | None = Query(default=None),
     limit: int = Query(default=100, le=500),
 ):
-    """Scouting rounds, newest first — the list a manager thinks of as reports."""
+    """Scouting rounds, newest first — the list a manager thinks of as reports.
+
+    The agent filters select *rounds that saw the thing*, not the matching
+    records: asking for Thrips returns whole walks in which thrips were found,
+    because the round is the unit a manager acts on. The clean beds in those
+    rounds still count, which is what keeps the pressure index honest.
+    """
     q = select(
         ScoutingRecord.batch_id,
         func.max(ScoutingRecord.recorded_at).label("ended"),
@@ -333,6 +409,8 @@ async def list_rounds(
         q = q.where(ScoutingRecord.scout_id == current.id)
     if greenhouse_id is not None:
         q = q.where(ScoutingRecord.greenhouse_id == greenhouse_id)
+    if scout_id is not None:
+        q = q.where(ScoutingRecord.scout_id == scout_id)
     if start is not None:
         q = q.where(
             ScoutingRecord.recorded_at
@@ -344,12 +422,115 @@ async def list_rounds(
             < datetime.combine(end, time.min, tzinfo=timezone.utc) + timedelta(days=1)
         )
 
+    # Agent and variety filters restrict which *rounds* qualify, so they are
+    # applied as a subquery over the records rather than to the outer scope —
+    # otherwise the round would come back containing only its matching rows.
+    def _rounds_where(*clauses):
+        return select(func.distinct(ScoutingRecord.batch_id)).where(*clauses)
+
+    if pest_id is not None:
+        q = q.where(
+            ScoutingRecord.batch_id.in_(
+                _rounds_where(
+                    ScoutingRecord.pest_id == pest_id, ScoutingRecord.severity > 0
+                )
+            )
+        )
+    if disease_id is not None:
+        q = q.where(
+            ScoutingRecord.batch_id.in_(
+                _rounds_where(
+                    ScoutingRecord.disease_id == disease_id,
+                    ScoutingRecord.severity > 0,
+                )
+            )
+        )
+    if variety_code:
+        q = q.where(
+            ScoutingRecord.batch_id.in_(
+                _rounds_where(ScoutingRecord.variety_code == variety_code)
+            )
+        )
+    if min_severity:
+        q = q.where(
+            ScoutingRecord.batch_id.in_(
+                _rounds_where(ScoutingRecord.severity >= min_severity)
+            )
+        )
+
     batches = (
         await db.execute(
-            q.group_by(ScoutingRecord.batch_id).order_by(func.max(ScoutingRecord.recorded_at).desc()).limit(limit)
+            q.group_by(ScoutingRecord.batch_id)
+            .order_by(func.max(ScoutingRecord.recorded_at).desc())
+            .limit(limit)
         )
     ).all()
-    return [await _round_summary(db, b.batch_id) for b in batches]
+
+    ids = [b.batch_id for b in batches]
+    summaries = await _summaries(db, ids)
+
+    # How many spray programs each round led to. One query for the lot: a
+    # round's programs are those raised against recommendations for its block
+    # and agents, dated at or after the walk.
+    await _attach_program_counts(db, list(summaries.values()))
+
+    return [summaries[i] for i in ids if i in summaries]
+
+
+async def _attach_program_counts(
+    db: AsyncSession, summaries: list[RoundSummary]
+) -> None:
+    """Count the spray programs each round produced, in one pass."""
+    if not summaries:
+        return
+
+    by_block: dict[int, list[RoundSummary]] = defaultdict(list)
+    for s in summaries:
+        if s.greenhouse_id is not None:
+            by_block[s.greenhouse_id].append(s)
+    if not by_block:
+        return
+
+    earliest = min(s.started_at for s in summaries)
+    rows = (
+        await db.execute(
+            select(
+                SprayRecord.greenhouse_id,
+                SprayRecord.program_id,
+                func.min(SprayRecord.scout_report_date).label("report_date"),
+                func.min(SprayRecord.recorded_at).label("raised_at"),
+            )
+            .where(
+                SprayRecord.greenhouse_id.in_(by_block),
+                SprayRecord.program_id.isnot(None),
+                SprayRecord.recorded_at >= earliest,
+            )
+            .group_by(SprayRecord.greenhouse_id, SprayRecord.program_id)
+        )
+    ).all()
+
+    for row in rows:
+        candidates = by_block.get(row.greenhouse_id, [])
+        if not candidates:
+            continue
+        # A program names the scouting report it answers. Failing that, credit
+        # the most recent round walked before the program was raised — the one
+        # a manager would have been looking at.
+        match = None
+        if row.report_date:
+            match = next(
+                (
+                    s
+                    for s in candidates
+                    if s.started_at.date() == row.report_date
+                ),
+                None,
+            )
+        if match is None:
+            prior = [s for s in candidates if s.started_at <= row.raised_at]
+            match = max(prior, key=lambda s: s.started_at) if prior else None
+        if match is not None:
+            match.programs += 1
 
 
 @router.get("/rounds/{batch_id}", response_model=RoundDetail)
