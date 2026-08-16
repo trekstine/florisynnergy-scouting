@@ -7,9 +7,11 @@ import {
   Check,
   ClipboardList,
   Download,
+  Leaf,
   MapPin,
   ShieldAlert,
   ShieldCheck,
+  StickyNote,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -34,6 +36,7 @@ import {
   REC_STATUS_LABEL,
   SCOUTING_LABEL,
   VERIFICATION_LABEL,
+  bedLabel,
   formatDateTime,
   isVerified,
   relativeTime,
@@ -278,10 +281,26 @@ export default function ScoutingPage() {
       "over_etl",
       "verification",
       "scout",
+      "stage",
+      "location_on_plant",
+      "beneficials",
+      "sticky_trap_count",
+      "lure_count",
+      "fcm_count",
+      "has_photo",
       "flagged",
+      "flag_reason",
       "notes",
+      "session_comment",
+      "batch_id",
     ];
-    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const esc = (v: unknown) => {
+      const t = String(v ?? "");
+      // Excel runs a cell starting =, +, - or @ as a formula, and a scout's
+      // note is free text.
+      const safe = /^[=+\-@]/.test(t) ? `'${t}` : t;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
     const lines = sorted.map((x) =>
       [
         x.r.recorded_at,
@@ -295,8 +314,18 @@ export default function ScoutingPage() {
         x.overEtl ? "yes" : "no",
         VERIFICATION_LABEL[x.r.verification_method],
         x.scoutLabel,
+        x.r.stage ?? "",
+        x.r.location_on_plant ?? "",
+        x.r.beneficials_count,
+        x.r.sticky_trap_bug_count,
+        x.r.lure_bug_count,
+        x.r.fcm_count,
+        x.r.image_url ? "yes" : "no",
         x.r.flagged ? "yes" : "no",
+        x.r.flag_reason ?? "",
         x.r.notes ?? "",
+        x.r.session_comment ?? "",
+        x.r.batch_id ?? "",
       ]
         .map(esc)
         .join(","),
@@ -474,13 +503,62 @@ export default function ScoutingPage() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 text-sm font-semibold text-ink">
-                        {x.ghLabel} · {x.r.bed_code ?? "—"} · {x.target}
+                        {x.ghLabel}
+                        {x.r.bed_code && ` · ${bedLabel(x.r.bed_code)}`} · {x.target}
                       </span>
                       <span className="mt-0.5 block truncate text-xs text-ink-faint">
                         {SCOUTING_LABEL[x.r.scouting_for]} · {x.varietyLabel} ·{" "}
                         {x.scoutLabel} · {x.r.stage ?? "stage n/a"} ·{" "}
                         {formatDateTime(x.r.recorded_at)}
                       </span>
+
+                      {/* What the scout actually recorded, beyond the severity
+                          number — where on the plant, what they caught, what
+                          they wrote down. A record is an observation, and the
+                          observation is mostly in these fields. */}
+                      <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {x.r.location_on_plant && (
+                          <Chip icon={<Leaf size={10} />}>{x.r.location_on_plant}</Chip>
+                        )}
+                        {x.r.beneficials_count > 0 && (
+                          <Chip icon={<ShieldCheck size={10} />} tone="#047857">
+                            {x.r.beneficials_count} beneficials
+                          </Chip>
+                        )}
+                        {x.r.sticky_trap_bug_count > 0 && (
+                          <Chip icon={<Bug size={10} />}>
+                            {x.r.sticky_trap_bug_count} on trap
+                          </Chip>
+                        )}
+                        {x.r.lure_bug_count > 0 && (
+                          <Chip icon={<Bug size={10} />}>
+                            {x.r.lure_bug_count} in lure
+                          </Chip>
+                        )}
+                        {x.r.fcm_count > 0 && (
+                          <Chip icon={<Bug size={10} />}>{x.r.fcm_count} FCM</Chip>
+                        )}
+                        {x.r.image_url && (
+                          <Chip icon={<Camera size={10} />} tone="#0369a1">
+                            photo
+                          </Chip>
+                        )}
+                      </span>
+
+                      {x.r.notes && (
+                        <span className="mt-1 flex items-start gap-1.5 text-xs text-ink-soft">
+                          <StickyNote
+                            size={11}
+                            className="mt-0.5 shrink-0 text-ink-faint"
+                          />
+                          <span className="line-clamp-2">{x.r.notes}</span>
+                        </span>
+                      )}
+                      {x.r.session_comment && !x.r.notes && (
+                        <span className="mt-1 block truncate text-xs italic text-ink-faint">
+                          &ldquo;{x.r.session_comment}&rdquo;
+                        </span>
+                      )}
                     </span>
                     <span className="hidden shrink-0 items-center gap-1.5 sm:flex">
                       {x.overEtl && <Badge color="#dc2626">Over ETL</Badge>}
@@ -530,6 +608,27 @@ export default function ScoutingPage() {
         />
       )}
     </div>
+  );
+}
+
+/** A small fact off the record — worth showing, not worth a column. */
+function Chip({
+  icon,
+  tone,
+  children,
+}: {
+  icon: React.ReactNode;
+  tone?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className="flex items-center gap-1 rounded-full bg-surface px-1.5 py-0.5 text-[10px] font-medium"
+      style={{ color: tone ?? "#64748b" }}
+    >
+      {icon}
+      {children}
+    </span>
   );
 }
 

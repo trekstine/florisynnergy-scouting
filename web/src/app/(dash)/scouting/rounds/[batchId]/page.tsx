@@ -1,9 +1,19 @@
 "use client";
 
-import { ArrowLeft, Bug, FileCheck2, MapPin, Paperclip, SprayCan } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Bug,
+  Camera,
+  FileCheck2,
+  MapPin,
+  Paperclip,
+  SprayCan,
+  StickyNote,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { STATUS_HEX } from "@/components/SprayProgramPanel";
 import { Badge, Card, CardHeader, EmptyState, PageHeader, Spinner } from "@/components/ui";
@@ -225,8 +235,11 @@ export default function ScoutingRoundPage() {
                   <th className="px-3 py-2.5 font-semibold">Bed</th>
                   <th className="px-3 py-2.5 font-semibold">Type</th>
                   <th className="px-3 py-2.5 font-semibold">Target</th>
+                  <th className="px-3 py-2.5 font-semibold">Variety</th>
+                  <th className="px-3 py-2.5 font-semibold">Stage</th>
+                  <th className="px-3 py-2.5 font-semibold">On plant</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Counts</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Severity</th>
-                  <th className="px-3 py-2.5 font-semibold">Notes</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -237,43 +250,99 @@ export default function ScoutingRoundPage() {
                       : e.pest_id != null
                         ? (pestName.get(e.pest_id) ?? "Pest")
                         : "—";
+                  const counts = [
+                    e.sticky_trap_bug_count > 0 && `${e.sticky_trap_bug_count} trap`,
+                    e.lure_bug_count > 0 && `${e.lure_bug_count} lure`,
+                    e.fcm_count > 0 && `${e.fcm_count} FCM`,
+                    e.beneficials_count > 0 &&
+                      `${e.beneficials_count} beneficials`,
+                  ].filter(Boolean) as string[];
+
                   return (
-                    <tr key={e.id} className="hover:bg-surface">
-                      <td className="whitespace-nowrap px-5 py-2.5">
-                        <Link
-                          href={`/scouting/${e.id}`}
-                          className="font-medium text-brand-700 hover:underline"
-                        >
-                          {new Date(e.recorded_at).toLocaleTimeString("en-GB", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </Link>
-                      </td>
-                      <td className="px-3 py-2.5 text-ink-soft">
-                        {e.bed_code ? bedLabel(e.bed_code) : "—"}
-                      </td>
-                      <td className="px-3 py-2.5 text-ink-faint">
-                        {SCOUTING_LABEL[e.scouting_for]}
-                      </td>
-                      <td className="px-3 py-2.5 text-ink-soft">{target}</td>
-                      <td className="px-3 py-2.5 text-right">
-                        <span
-                          className="inline-block min-w-[1.75rem] rounded px-1.5 py-0.5 text-xs font-bold text-white"
-                          style={{ backgroundColor: severityHex(e.severity) }}
-                        >
-                          {e.severity}
-                        </span>
-                      </td>
-                      <td className="max-w-xs truncate px-3 py-2.5 text-ink-faint">
-                        {e.notes ?? "—"}
-                      </td>
-                    </tr>
+                    <Fragment key={e.id}>
+                      <tr className="hover:bg-surface">
+                        <td className="whitespace-nowrap px-5 py-2.5 align-top">
+                          <Link
+                            href={`/scouting/${e.id}`}
+                            className="font-medium text-brand-700 hover:underline"
+                          >
+                            {new Date(e.recorded_at).toLocaleTimeString("en-GB", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </Link>
+                        </td>
+                        <td className="px-3 py-2.5 align-top text-ink-soft">
+                          {e.bed_code ? bedLabel(e.bed_code) : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 align-top text-ink-faint">
+                          {SCOUTING_LABEL[e.scouting_for]}
+                        </td>
+                        <td className="px-3 py-2.5 align-top font-medium text-ink">
+                          {target}
+                        </td>
+                        <td className="px-3 py-2.5 align-top text-ink-soft">
+                          {e.variety_code ?? "—"}
+                        </td>
+                        <td className="px-3 py-2.5 align-top text-ink-soft">
+                          {e.stage ?? "—"}
+                        </td>
+                        <td className="px-3 py-2.5 align-top text-ink-soft">
+                          {e.location_on_plant ?? "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-right align-top text-xs text-ink-faint">
+                          {counts.length ? counts.join(" · ") : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-right align-top">
+                          <span
+                            className="inline-block min-w-[1.75rem] rounded px-1.5 py-0.5 text-xs font-bold text-white"
+                            style={{ backgroundColor: severityHex(e.severity) }}
+                          >
+                            {e.severity}
+                          </span>
+                        </td>
+                      </tr>
+
+                      {/* The scout's own words, in full. Truncating a note to a
+                          column width loses the half of it that says why. */}
+                      {(e.notes || e.image_url || e.flagged) && (
+                        <tr className="border-b border-line">
+                          <td />
+                          <td colSpan={8} className="px-3 pb-3 pt-0">
+                            <div className="flex flex-wrap items-start gap-x-4 gap-y-1.5">
+                              {e.notes && (
+                                <span className="flex max-w-2xl items-start gap-1.5 text-xs text-ink-soft">
+                                  <StickyNote
+                                    size={11}
+                                    className="mt-0.5 shrink-0 text-ink-faint"
+                                  />
+                                  {e.notes}
+                                </span>
+                              )}
+                              {e.image_url && (
+                                <Link
+                                  href={`/scouting/${e.id}`}
+                                  className="flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline"
+                                >
+                                  <Camera size={11} /> Photo
+                                </Link>
+                              )}
+                              {e.flagged && (
+                                <span className="flex items-center gap-1 text-xs text-amber-700">
+                                  <AlertTriangle size={11} />
+                                  {e.flag_reason ?? "Flagged for review"}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
                 {shown.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-5 py-6 text-center text-ink-faint">
+                    <td colSpan={9} className="px-5 py-6 text-center text-ink-faint">
                       Every bed walked came back clean.
                     </td>
                   </tr>
