@@ -121,7 +121,7 @@ export function ApprovalSignatures({
 
       {/* The fingerprint, printed with the sheet so a paper copy can be
           checked against the record it came from. */}
-      <footer className="border-t border-line px-5 py-3">
+      {/* <footer className="border-t border-line px-5 py-3">
         <p className="text-[10px] uppercase tracking-wider text-ink-faint">
           Content fingerprint (SHA-256)
         </p>
@@ -133,7 +133,7 @@ export function ApprovalSignatures({
             now: {state.current_hash}
           </p>
         )}
-      </footer>
+      </footer> */}
 
       {signing && (
         <SignDialog
