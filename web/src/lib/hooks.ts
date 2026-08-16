@@ -351,6 +351,35 @@ export const useAgentTrend = (f: Filters = {}) =>
       api.get<AgentTrendPoint[]>(`${V1}/analytics/agent-trend${filterQS(f)}`),
   });
 
+/**
+ * Fill in anything an older API build did not send.
+ *
+ * The web container and the api container restart independently, so for a
+ * minute or two after a deploy a new page can be talking to an old server.
+ * A missing array is not worth a crashed screen — the counts read as zero
+ * until the backend catches up, which is exactly what a manager should see.
+ */
+function normaliseRound(r: RoundSummary): RoundSummary {
+  return {
+    ...r,
+    agents: r.agents ?? [],
+    pests: r.pests ?? [],
+    diseases: r.diseases ?? [],
+    varieties: r.varieties ?? [],
+    records: r.records ?? 0,
+    beds: r.beds ?? 0,
+    findings: r.findings ?? 0,
+    max_severity: r.max_severity ?? 0,
+    clean_beds: r.clean_beds ?? 0,
+    hotspots: r.hotspots ?? 0,
+    beneficials: r.beneficials ?? 0,
+    photos: r.photos ?? 0,
+    flagged: r.flagged ?? 0,
+    duration_minutes: r.duration_minutes ?? 0,
+    programs: r.programs ?? 0,
+  };
+}
+
 /** What narrows the reports list. Shared with the CSV export so both agree. */
 export interface RoundFilters {
   greenhouse_id?: number;
@@ -383,7 +412,10 @@ export const useRounds = (
   return useQuery({
     queryKey: ["rounds", s],
     enabled: params !== null,
-    queryFn: () => api.get<RoundSummary[]>(`${V1}/scouting/rounds${s ? `?${s}` : ""}`),
+    queryFn: async () =>
+      (await api.get<RoundSummary[]>(`${V1}/scouting/rounds${s ? `?${s}` : ""}`)).map(
+        normaliseRound,
+      ),
   });
 };
 
@@ -392,7 +424,10 @@ export const useRound = (batchId: string | null) =>
   useQuery({
     queryKey: ["round", batchId],
     enabled: !!batchId,
-    queryFn: () => api.get<RoundDetail>(`${V1}/scouting/rounds/${batchId}`),
+    queryFn: async () => {
+      const d = await api.get<RoundDetail>(`${V1}/scouting/rounds/${batchId}`);
+      return { ...d, round: normaliseRound(d.round) };
+    },
   });
 
 // ── Spray program lifecycle + e-filing ──
