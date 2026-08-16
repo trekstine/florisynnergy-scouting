@@ -449,6 +449,9 @@ tbl([
     [CB("Hotspot"), C("Any single observation at severity 4 or above")],
     [CB("Program"), C("One spray event, which may contain several tank-mixed products")],
     [CB("Round"), C("One scout's walk of a block, submitted together as a batch")],
+    [CB("Dwell cap"), C("45 minutes. A longer gap between two records is counted as a "
+                        "break, not as time spent on a bed, so the movement report is "
+                        "not inflated by lunch")],
 ], [32 * mm, W - 32 * mm])
 
 
