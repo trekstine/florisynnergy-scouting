@@ -51,6 +51,7 @@ export const SETTINGS_CHILDREN = [
   { href: "/mapping", label: "Farm Mapping" },
   { href: "/workforce", label: "Workforce" },
   { href: "/reference", label: "Reference Data" },
+  { href: "/approvals", label: "Approval Signatures" },
 ];
 
 /** Routes that belong to the Settings area (hub + its three sub-pages). */

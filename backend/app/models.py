@@ -566,3 +566,91 @@ class IntegrationAlias(Base):
             name="ck_integration_alias_kind",
         ),
     )
+
+
+# ──────────────────────── Approval signing (e-signing) ───────────────────────
+class ApprovalSlot(Base):
+    """One signature line on an approval sheet, configured per farm.
+
+    Farms differ in who has to sign off a spray: some want the agronomist, the
+    manager and the storeman; some only the manager. Rather than hard-code one
+    farm's paperwork, the slots are data.
+    """
+
+    __tablename__ = "approval_slots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    farm_id: Mapped[int | None] = mapped_column(
+        ForeignKey("farms.id", ondelete="CASCADE")
+    )
+    # What the sheet calls this line, e.g. "Approved by".
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    # A note printed under the line, e.g. "Authorises the spend and the mix".
+    hint: Mapped[str | None] = mapped_column(String(200))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    # Null means anyone signed in may sign this line.
+    required_role: Mapped[str | None] = mapped_column(String(20))
+    is_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "required_role IS NULL OR required_role IN ('scout', 'supervisor', 'admin')",
+            name="ck_approval_slot_role",
+        ),
+    )
+
+
+class Signature(Base):
+    """A signature applied to a document, and the proof of what was signed.
+
+    ``content_hash`` is the point. A signature over a document that can still
+    change afterwards proves nothing, so the hash of the exact content at
+    signing time is stored alongside the mark. Recomputing it later says
+    whether the sheet still shows what the signer agreed to.
+    """
+
+    __tablename__ = "signatures"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # 'spray_program' today; the table is deliberately not spray-specific.
+    document_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+
+    slot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("approval_slots.id", ondelete="SET NULL")
+    )
+    # Denormalised: a slot can be renamed or retired later, and the sheet must
+    # still say what this person was signing as at the time.
+    slot_label: Mapped[str] = mapped_column(String(80), nullable=False)
+
+    employee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    signer_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    signer_role: Mapped[str | None] = mapped_column(String(20))
+
+    # The drawn mark, stored as an image under /media.
+    image_url: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    signed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    ip_address: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+
+    # Voiding rather than deleting: an approval that was withdrawn is itself a
+    # fact worth keeping.
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_by: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    void_reason: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("idx_signature_doc", "document_type", "document_id"),
+    )

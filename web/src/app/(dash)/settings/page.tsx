@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 
 import { LogoMark } from "@/components/Logo";
 import {
+  useApprovalSlots,
   useChemicals,
   useDiseases,
   useEmployees,
@@ -27,6 +28,7 @@ import {
 const SECTIONS = [
   { id: "farm", label: "Farm setup" },
   { id: "people", label: "People & access" },
+  { id: "approvals", label: "Compliance & approvals" },
   { id: "agronomy", label: "Agronomy reference" },
   { id: "rules", label: "Detection rules" },
   { id: "about", label: "About" },
@@ -40,6 +42,7 @@ export default function SettingsPage() {
   const diseases = useDiseases();
   const chemicals = useChemicals();
   const etlRules = useEtlRules();
+  const slots = useApprovalSlots();
 
   const [active, setActive] = useState<string>("farm");
 
@@ -122,6 +125,15 @@ export default function SettingsPage() {
               label="Device PINs"
               hint="Each scout signs in on one registered device with a 4-digit PIN."
               value="Managed per employee"
+            />
+          </Section>
+
+          <Section id="approvals" title="Compliance & approvals">
+            <Row
+              href="/approvals"
+              label="Approval signatures"
+              hint="Who must sign a spray approval sheet, and in what order. Signing locks the programme and files a signed PDF."
+              value={n(slots.data?.filter((s) => s.is_active).length, "line")}
             />
           </Section>
 

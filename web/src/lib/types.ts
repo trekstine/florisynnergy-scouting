@@ -543,3 +543,50 @@ export interface Recommendation {
   created_at: string;
   resolved_at: string | null;
 }
+
+// ── Approval signing ────────────────────────────────────────────────────────
+export interface ApprovalSlot {
+  id: number;
+  farm_id: number | null;
+  label: string;
+  hint: string | null;
+  position: number;
+  required_role: Role | null;
+  is_required: boolean;
+  is_active: boolean;
+}
+
+export interface SignatureRecord {
+  id: number;
+  slot_id: number | null;
+  slot_label: string;
+  employee_id: number | null;
+  signer_name: string;
+  signer_role: string | null;
+  image_url: string | null;
+  content_hash: string;
+  signed_at: string;
+  ip_address: string | null;
+  voided_at: string | null;
+  void_reason: string | null;
+}
+
+export interface SignatureSlotState {
+  slot: ApprovalSlot;
+  signature: SignatureRecord | null;
+}
+
+export interface ApprovalState {
+  document_type: string;
+  document_id: string;
+  slots: SignatureSlotState[];
+  orphan_signatures: SignatureRecord[];
+  current_hash: string;
+  signed_hash: string | null;
+  /** False means the document changed after it was signed. */
+  intact: boolean;
+  locked: boolean;
+  complete: boolean;
+  signed_count: number;
+  required_count: number;
+}

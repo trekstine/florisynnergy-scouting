@@ -4,6 +4,7 @@ import { Printer } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useMemo } from "react";
 
+import { ApprovalSignatures } from "@/components/ApprovalSignatures";
 import { LogoLockup } from "@/components/Logo";
 import { Spinner } from "@/components/ui";
 import { formatDate, isHazardous, money } from "@/lib/format";
@@ -126,6 +127,14 @@ export default function SprayApprovalPage() {
             <p className="text-sm font-bold text-ink">
               {head.scout_report_date ? formatDate(head.scout_report_date) : "Not recorded"}
             </p>
+          </div>
+          <div>
+            {/* Who raised it is a fact of the record, distinct from who signs
+                for it — worth stating even before anybody has signed. */}
+            <p className="text-[10px] uppercase tracking-wider text-ink-faint">
+              Raised by
+            </p>
+            <p className="text-sm font-medium text-ink">{preparedBy ?? "—"}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-wider text-ink-faint">
@@ -269,13 +278,12 @@ export default function SprayApprovalPage() {
           )}
         </Section>
 
-        {/* ── Sign-off ── */}
+        {/* ── Sign-off ──
+            Signed in the portal rather than on paper: a drawn mark, a
+            re-entered PIN, and a fingerprint of the sheet as it stood, so the
+            approval can be checked later rather than merely believed. */}
         <Section title="Authorisation">
-          <div className="grid grid-cols-3 gap-6 pt-2">
-            <SignBlock role="Prepared by (agronomist)" prefilled={preparedBy} />
-            <SignBlock role="Approved by (farm manager)" />
-            <SignBlock role="Applied by (spray operator)" />
-          </div>
+          <ApprovalSignatures documentId={programId} />
         </Section>
 
         <footer className="mt-8 border-t border-line pt-3 text-[10px] text-ink-faint">
@@ -323,18 +331,6 @@ function Constraint({
       <p className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</p>
       <p className={`mt-0.5 text-sm font-bold ${alert ? "text-red-700" : "text-ink"}`}>{value}</p>
       <p className="mt-1 text-[10px] leading-snug text-ink-faint">{detail}</p>
-    </div>
-  );
-}
-
-function SignBlock({ role, prefilled }: { role: string; prefilled?: string | null }) {
-  return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint">{role}</p>
-      <p className="mt-6 border-b border-ink pb-0.5 text-xs text-ink">{prefilled ?? " "}</p>
-      <p className="mt-0.5 text-[10px] text-ink-faint">Name</p>
-      <p className="mt-5 border-b border-ink">&nbsp;</p>
-      <p className="mt-0.5 text-[10px] text-ink-faint">Signature &amp; date</p>
     </div>
   );
 }

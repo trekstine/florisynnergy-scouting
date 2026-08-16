@@ -15,6 +15,7 @@ from ..models import (
     Chemical,
     Employee,
     Recommendation,
+    Signature,
     SprayAttachment,
     SprayRecord,
 )
@@ -330,6 +331,19 @@ async def create_spray_program(
 # share a program_id), so any one record answers "did this actually go out?".
 
 
+async def _has_live_signature(db: AsyncSession, program_id: str) -> bool:
+    """Has anybody signed this program's approval sheet and not withdrawn it?"""
+    return (
+        await db.execute(
+            select(Signature.id).where(
+                Signature.document_type == "spray_program",
+                Signature.document_id == program_id,
+                Signature.voided_at.is_(None),
+            ).limit(1)
+        )
+    ).first() is not None
+
+
 async def _program_rows(db: AsyncSession, program_id: str) -> list[SprayRecord]:
     rows = list(
         (
@@ -403,6 +417,15 @@ async def update_spray_program(
     existing = await _program_rows(db, program_id)
     head = existing[0]
 
+    # A signature is an agreement to a specific sheet. Editing underneath one
+    # would leave a named person having approved something they never saw.
+    if await _has_live_signature(db, program_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This program has been signed and can no longer be edited. Void the "
+            "signatures on the approval sheet first.",
+        )
+
     if head.program_status != "planned":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -452,6 +475,11 @@ async def delete_spray_program(
 ):
     """Withdraw a program that was raised in error — planned ones only."""
     rows = await _program_rows(db, program_id)
+    if await _has_live_signature(db, program_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A signed approval cannot be deleted. Void the signatures first.",
+        )
     if rows[0].program_status != "planned":
         raise HTTPException(
             status.HTTP_409_CONFLICT,

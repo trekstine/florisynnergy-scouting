@@ -17,10 +17,16 @@ const PAGE_TITLES: Record<string, string> = {
   "/mapping": "Farm Mapping",
   "/workforce": "Workforce",
   "/reference": "Reference Data",
+  "/approvals": "Approval Signatures",
 };
 
 /** Sub-pages that live under the Settings hub get a breadcrumb. */
-const SETTINGS_CHILDREN = new Set(["/mapping", "/workforce", "/reference"]);
+const SETTINGS_CHILDREN = new Set([
+  "/mapping",
+  "/workforce",
+  "/reference",
+  "/approvals",
+]);
 
 export function Topbar({ user }: { user: SessionUser | null }) {
   const router = useRouter();

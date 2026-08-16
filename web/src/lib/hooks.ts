@@ -13,6 +13,8 @@ import type {
   Chemical,
   ComplianceResult,
   Disease,
+  ApprovalSlot,
+  ApprovalState,
   Employee,
   EtlAudit,
   EtlRule,
@@ -733,5 +735,92 @@ export function useSprayFromRecommendation() {
       qc.invalidateQueries({ queryKey: ["spray-cost"] });
       qc.invalidateQueries({ queryKey: ["compliance"] });
     },
+  });
+}
+
+// ── Approval signing ────────────────────────────────────────────────────────
+const APPROVAL_KEYS = ["approval", "spray", "attachments"];
+
+export const useApprovalSlots = () =>
+  useQuery({
+    queryKey: ["approval-slots"],
+    queryFn: () => api.get<ApprovalSlot[]>(`${V1}/approvals/slots`),
+  });
+
+/** The signature state of one document, and whether it still matches. */
+export const useApprovalState = (documentId: string | null, documentType = "spray_program") =>
+  useQuery({
+    queryKey: ["approval", documentType, documentId],
+    enabled: !!documentId,
+    queryFn: () =>
+      api.get<ApprovalState>(
+        `${V1}/approvals/${documentType}/${encodeURIComponent(documentId!)}`,
+      ),
+  });
+
+export function useSign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      documentId,
+      documentType = "spray_program",
+      ...body
+    }: {
+      documentId: string;
+      documentType?: string;
+      slot_id: number;
+      pin: string;
+      signature_image?: string | null;
+    }) =>
+      api.post<ApprovalState>(
+        `${V1}/approvals/${documentType}/${encodeURIComponent(documentId)}/sign`,
+        body,
+      ),
+    onSuccess: () => {
+      for (const key of APPROVAL_KEYS) qc.invalidateQueries({ queryKey: [key] });
+    },
+  });
+}
+
+export function useVoidSignature() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      documentId,
+      signatureId,
+      reason,
+      documentType = "spray_program",
+    }: {
+      documentId: string;
+      signatureId: number;
+      reason: string;
+      documentType?: string;
+    }) =>
+      api.post<ApprovalState>(
+        `${V1}/approvals/${documentType}/${encodeURIComponent(documentId)}/void/${signatureId}`,
+        { reason },
+      ),
+    onSuccess: () => {
+      for (const key of APPROVAL_KEYS) qc.invalidateQueries({ queryKey: [key] });
+    },
+  });
+}
+
+export function useSaveApprovalSlot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: Partial<ApprovalSlot> & { id?: number }) =>
+      id
+        ? api.patch<ApprovalSlot>(`${V1}/approvals/slots/${id}`, body)
+        : api.post<ApprovalSlot>(`${V1}/approvals/slots`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["approval-slots"] }),
+  });
+}
+
+export function useRetireApprovalSlot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.del<void>(`${V1}/approvals/slots/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["approval-slots"] }),
   });
 }

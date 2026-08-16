@@ -1012,3 +1012,101 @@ class UnmatchedName(BaseModel):
     alias: str
     hits: int
     source: str
+
+
+# ──────────────────────────── Approval signing ───────────────────────────────
+RoleLiteral = Literal["scout", "supervisor", "admin"]
+
+
+class ApprovalSlotIn(BaseModel):
+    """A signature line on the approval sheet."""
+
+    label: str = Field(max_length=80)
+    hint: str | None = Field(default=None, max_length=200)
+    position: int = 0
+    farm_id: int | None = None
+    required_role: RoleLiteral | None = None
+    is_required: bool = True
+    is_active: bool = True
+
+
+class ApprovalSlotUpdate(BaseModel):
+    label: str | None = Field(default=None, max_length=80)
+    hint: str | None = Field(default=None, max_length=200)
+    position: int | None = None
+    required_role: RoleLiteral | None = None
+    is_required: bool | None = None
+    is_active: bool | None = None
+
+
+class ApprovalSlotOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    farm_id: int | None
+    label: str
+    hint: str | None
+    position: int
+    required_role: str | None
+    is_required: bool
+    is_active: bool
+
+
+class SignatureOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    slot_id: int | None
+    slot_label: str
+    employee_id: int | None
+    signer_name: str
+    signer_role: str | None
+    image_url: str | None
+    content_hash: str
+    signed_at: datetime
+    ip_address: str | None
+    voided_at: datetime | None
+    void_reason: str | None
+
+
+class SignRequest(BaseModel):
+    """Apply a signature. The PIN is the re-authentication.
+
+    Asking again at the moment of signing is the point: a session left open on
+    a shared office machine should not be able to approve a spray.
+    """
+
+    slot_id: int
+    pin: str
+    # A PNG data URL of the drawn mark, e.g. "data:image/png;base64,iVBOR…".
+    signature_image: str | None = None
+
+
+class VoidRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class SignatureSlotState(BaseModel):
+    """One line on the sheet, and whoever has signed it."""
+
+    slot: ApprovalSlotOut
+    signature: SignatureOut | None = None
+
+
+class ApprovalState(BaseModel):
+    """Everything the approval sheet needs to render and to be trusted."""
+
+    document_type: str
+    document_id: str
+    slots: list[SignatureSlotState]
+    # Signatures whose slot has since been deleted — still part of the record.
+    orphan_signatures: list[SignatureOut] = []
+    current_hash: str
+    # The hash as it was at the first signature. Null when nothing is signed.
+    signed_hash: str | None = None
+    # False means the content changed after it was signed.
+    intact: bool = True
+    locked: bool = False
+    complete: bool = False
+    signed_count: int = 0
+    required_count: int = 0
