@@ -534,3 +534,35 @@ class ActivityLog(Base):
             name="ck_activity_verification",
         ),
     )
+
+
+class IntegrationAlias(Base):
+    """A name a partner app uses, mapped to the reference row it means.
+
+    Free-text from another system will never line up perfectly with the
+    portal's tables. Rather than guessing harder in code, an unresolved name is
+    recorded once here by an admin and every later submission carrying that
+    text resolves instantly.
+    """
+
+    __tablename__ = "integration_aliases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # 'greenhouse' | 'pest' | 'disease' | 'variety'
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    alias: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str] = mapped_column(String(40), default="blooms")
+    # Seen but not yet mapped: target_id 0 marks a name awaiting a decision.
+    hits: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("kind", "alias", "source", name="uq_integration_alias"),
+        CheckConstraint(
+            "kind IN ('greenhouse', 'pest', 'disease', 'variety')",
+            name="ck_integration_alias_kind",
+        ),
+    )

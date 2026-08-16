@@ -853,3 +853,128 @@ class RecommendationOutcome(BaseModel):
     effective_threshold: int
     delta: int | None  # latest − baseline (negative = improving)
     verdict: OutcomeVerdict
+
+
+# ─────────────────── Credible Blooms integration (compat) ────────────────────
+# The Blooms app speaks in names, not ids, and groups a whole walk into one
+# submission. These models describe that dialect exactly so the app needs no
+# reshaping — the translation happens here, once.
+
+
+class BloomsItem(BaseModel):
+    """One observation inside a submitted session."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    pest: str | None = None
+    disease: str | None = None
+    bed: str | None = None
+    variety: str | None = None
+    score: str | int | None = None
+    notes: str | None = None
+    stage: str | None = None
+    location: str | None = None
+    locationonplant: str | None = None
+    pestseverity: str | int | None = None
+    diseaseseverity: str | int | None = None
+    stickytrapbugcount: str | int | None = None
+    luresbugcount: str | int | None = None
+    bufferzonecount: str | int | None = None
+    fcmcount: str | int | None = None
+    beneficialscount: str | int | None = None
+    lureid: str | None = None
+    stickytrapid: str | None = None
+    imageurl: str | None = None
+
+
+class BloomsSession(BaseModel):
+    """A whole scouting walk, exactly as the Blooms app posts it today."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    scoutingfor: str
+    scout: str | None = None
+    location: str | None = None  # greenhouse, by name
+    comments: str | None = None
+    partition: str | None = None
+    variety: str | None = None
+    recorded_at: datetime | None = None
+    items: list[BloomsItem] = []
+
+
+class BloomsIngestResult(BaseModel):
+    """What the portal made of a submission — including what it could not place."""
+
+    batch_id: str
+    accepted: int
+    scout_id: int | None = None
+    greenhouse_id: int | None = None
+    recommendations_created: int = 0
+    # kind → the names that could not be resolved, e.g. {"pest": ["Red Spider"]}
+    unmatched: dict[str, list[str]] = {}
+
+
+class BloomsRecord(BaseModel):
+    """A portal record rendered back in the Blooms app's own JSON shape.
+
+    Deliberately all-strings: the app's ``ScoutingData.fromJson`` was written
+    against a PHP API that returns strings for everything, and it stays working
+    untouched.
+    """
+
+    recordid: str
+    activity: str = "Scouting"
+    variety: str = ""
+    scout: str = ""
+    location: str = ""
+    comments: str = ""
+    bed: str = ""
+    partitionno: str = ""
+    stickytrapid: str = ""
+    lureid: str = ""
+    scoutingfor: str = ""
+    pestname: str = ""
+    pestseverity: str = "0"
+    diseasename: str = ""
+    diseaseseverity: str = "0"
+    fcmcount: str = "0"
+    stickytrapbugcount: str = "0"
+    luresbugcount: str = "0"
+    beneficialscount: str = "0"
+    stage: str = ""
+    locationonplant: str = ""
+    notes: str = ""
+    imageurl: str = ""
+    createdtime: str = ""
+    # Portal extras the app can start using without breaking the old parser.
+    batchid: str = ""
+    greenhouseid: str = ""
+
+
+class AliasIn(BaseModel):
+    """Map a name a partner app uses onto the reference row it means."""
+
+    kind: Literal["greenhouse", "pest", "disease", "variety"]
+    alias: str
+    target_id: int
+    source: str = "blooms"
+
+
+class AliasOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    alias: str
+    target_id: int
+    source: str
+    hits: int
+
+
+class UnmatchedName(BaseModel):
+    """A name seen on the wire that the portal could not place."""
+
+    kind: str
+    alias: str
+    hits: int
+    source: str

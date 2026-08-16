@@ -15,6 +15,7 @@ from .routers import (
     auth,
     etl_rules,
     farms,
+    integrations,
     media,
     recommendations,
     reference,
@@ -95,3 +96,4 @@ app.include_router(analytics.router, prefix=API_V1_PREFIX)
 app.include_router(recommendations.router, prefix=API_V1_PREFIX)
 app.include_router(etl_rules.router, prefix=API_V1_PREFIX)
 app.include_router(media.router, prefix=API_V1_PREFIX)
+app.include_router(integrations.router, prefix=API_V1_PREFIX)

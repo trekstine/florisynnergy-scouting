@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # buying prices). Set FLORI_API_KEY in .env; never commit the key.
     flori_api_url: str = "https://ipr.thinksynergyltd.com/api1/rest/getchemicals.php"
     flori_api_key: str | None = None
+    # Shared key the Credible Blooms app presents on the integration
+    # endpoints. Unset means the integration is closed, which is the right
+    # default for a write path that carries no user token.
+    integration_api_key: str | None = None
 
     @field_validator("cors_origins", mode="before")
     @classmethod
