@@ -5,17 +5,28 @@ import {
   Beaker,
   CalendarDays,
   FileCheck2,
+  Lock,
+  Pencil,
   ShieldAlert,
   Sprout,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 
+import { SprayProgramBuilder } from "@/components/SprayProgramBuilder";
 import { STATUS_HEX, SprayProgramPanel } from "@/components/SprayProgramPanel";
 import { Badge, Card, CardHeader, EmptyState, PageHeader, Spinner } from "@/components/ui";
 import { bedLabel, formatDate, isHazardous, money } from "@/lib/format";
-import { useEmployees, useGreenhouses, useSpray, useVarieties } from "@/lib/hooks";
+import {
+  useDeleteSprayProgram,
+  useEmployees,
+  useGreenhouses,
+  useMe,
+  useSpray,
+  useVarieties,
+} from "@/lib/hooks";
 import { programKey } from "@/lib/sprayExport";
 import type { ProgramStatus } from "@/lib/types";
 
@@ -36,10 +47,14 @@ export default function SprayProgramPage() {
   const params = useParams<{ programId: string }>();
   const programId = decodeURIComponent(params.programId);
 
+  const router = useRouter();
   const spray = useSpray(1000);
   const greenhouses = useGreenhouses();
   const varieties = useVarieties();
   const employees = useEmployees();
+  const me = useMe();
+  const removeProgram = useDeleteSprayProgram();
+  const [editing, setEditing] = useState(false);
 
   const rows = useMemo(
     () => (spray.data ?? []).filter((r) => programKey(r) === programId),
@@ -90,6 +105,26 @@ export default function SprayProgramPage() {
     ? Math.ceil((new Date(safeHarvest).getTime() - Date.now()) / 86_400_000)
     : null;
 
+  // A planned program has not touched the crop yet, so it can still be
+  // corrected. Once it is applied the chemical is on the plants and a signed
+  // sheet is filed — the server refuses the edit, and so does the button.
+  const role = me.data?.role;
+  const canEdit = status === "planned" && (role === "admin" || role === "supervisor");
+  const canDelete = status === "planned" && role === "admin";
+
+  async function withdraw() {
+    if (
+      !confirm(
+        "Withdraw this program? It was never applied, so nothing is being " +
+          "erased from the spray record.",
+      )
+    ) {
+      return;
+    }
+    await removeProgram.mutateAsync(programId);
+    router.push("/spray");
+  }
+
   return (
     <div className="space-y-5 pb-10">
       <PageHeader
@@ -97,6 +132,24 @@ export default function SprayProgramPage() {
         subtitle={`Spray program · ${formatDate(head.start_date ?? head.recorded_at)} · ${rows.length} product${rows.length === 1 ? "" : "s"}`}
         actions={
           <div className="flex items-center gap-2">
+            {canEdit && (
+              <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+              >
+                <Pencil className="h-4 w-4" /> Edit
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={withdraw}
+                disabled={removeProgram.isPending}
+                title="Withdraw a program raised in error"
+                className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink-faint transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
             <Link
               href={`/spray-approval/${encodeURIComponent(programId)}`}
               target="_blank"
@@ -126,6 +179,14 @@ export default function SprayProgramPage() {
           </Badge>
         )}
         {head.coverage && <Badge>{head.coverage}</Badge>}
+        {status !== "planned" && (
+          <span
+            className="flex items-center gap-1 text-xs text-ink-faint"
+            title="Corrections after application belong in the effectiveness review, or in a new program."
+          >
+            <Lock size={11} /> Locked — this program has been applied
+          </span>
+        )}
       </div>
 
       {/* Headline numbers */}
@@ -266,6 +327,19 @@ export default function SprayProgramPage() {
       <div className="px-6">
         <SprayProgramPanel programId={programId} records={rows} />
       </div>
+
+      <SprayProgramBuilder
+        open={editing}
+        onClose={() => setEditing(false)}
+        editing={{ programId, records: rows }}
+        context={{
+          greenhouseId: head.greenhouse_id,
+          greenhouseLabel: greenhouse,
+          bedCode: head.bed_code,
+          varietyCode: head.variety_code,
+          recommendationId: head.recommendation_id,
+        }}
+      />
     </div>
   );
 }

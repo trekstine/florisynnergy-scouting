@@ -198,15 +198,18 @@ async def preview_spray_product(
     )
 
 
-@router.post(
-    "/program", response_model=SprayProgramOut, status_code=status.HTTP_201_CREATED
-)
-async def create_spray_program(
+async def _build_program(
+    db: AsyncSession,
     payload: SprayProgramCreate,
-    db: AsyncSession = Depends(get_db),
-    current: Employee = Depends(require_roles("admin", "supervisor")),
-):
-    """Commit a reviewed, multi-product program as one application event."""
+    program_id: str,
+    current: Employee,
+) -> tuple[list[SprayRecord], Recommendation | None]:
+    """Screen, dose and cost a program's products.
+
+    Shared by create and edit so an edited program is held to exactly the same
+    compliance bar as a new one — a corrected tank mix that quietly skipped the
+    RAC rotation check would be worse than no edit at all.
+    """
     rec: Recommendation | None = None
     if payload.recommendation_id is not None:
         rec = await db.get(Recommendation, payload.recommendation_id)
@@ -255,7 +258,6 @@ async def create_spray_program(
             f" — {comments}" if comments else ""
         )
 
-    program_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     records: list[SprayRecord] = []
     for item in payload.items:
@@ -283,6 +285,21 @@ async def create_spray_program(
         )
         db.add(record)
         records.append(record)
+
+    return records, rec
+
+
+@router.post(
+    "/program", response_model=SprayProgramOut, status_code=status.HTTP_201_CREATED
+)
+async def create_spray_program(
+    payload: SprayProgramCreate,
+    db: AsyncSession = Depends(get_db),
+    current: Employee = Depends(require_roles("admin", "supervisor")),
+):
+    """Commit a reviewed, multi-product program as one application event."""
+    program_id = str(uuid.uuid4())
+    records, rec = await _build_program(db, payload, program_id, current)
 
     # Close the loop: a planned program marks its recommendation actioned.
     if rec is not None:
@@ -363,6 +380,87 @@ async def update_program_status(
     for r in rows:
         await db.refresh(r)
     return [SprayOut.model_validate(r) for r in rows]
+
+
+@router.put("/programs/{program_id}", response_model=SprayProgramOut)
+async def update_spray_program(
+    program_id: str,
+    payload: SprayProgramCreate,
+    db: AsyncSession = Depends(get_db),
+    current: Employee = Depends(require_roles("admin", "supervisor")),
+):
+    """Correct a program that has not gone out yet.
+
+    Only while the program is still *planned*. Once it is marked applied the
+    chemical is on the crop and a signed approval sheet is in a file somewhere;
+    editing it then would leave the paperwork describing a spray that never
+    happened. Corrections after application belong in the effectiveness review,
+    or in a new program.
+
+    The block is fixed too — a spray on a different greenhouse is a different
+    application event, not an edit of this one.
+    """
+    existing = await _program_rows(db, program_id)
+    head = existing[0]
+
+    if head.program_status != "planned":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This program is marked {head.program_status} and can no longer be "
+            "edited. Record a review, or raise a new program.",
+        )
+    if payload.greenhouse_id != head.greenhouse_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "A program cannot be moved to another greenhouse — raise a new one.",
+        )
+
+    # Keep the program's identity: the same id, so the approval sheet URL, the
+    # filed attachments and any link from a scouting report all still resolve.
+    records, rec = await _build_program(db, payload, program_id, current)
+
+    # The rebuilt rows replace the old ones. Deleting after the build means a
+    # compliance rejection leaves the original program untouched.
+    for row in existing:
+        await db.delete(row)
+
+    if rec is not None:
+        if len(payload.items) == 1:
+            rec.recommended_chemical_id = payload.items[0].chemical_id
+        if rec.status in ("open", "planned"):
+            rec.status = "actioned"
+
+    await db.commit()
+    for r in records:
+        await db.refresh(r)
+
+    total = sum(float(r.cost_of_chemical or 0) for r in records)
+    harvest_dates = [r.safe_harvest_date for r in records if r.safe_harvest_date]
+    return SprayProgramOut(
+        program_id=program_id,
+        records=[SprayOut.model_validate(r) for r in records],
+        total_cost=round(total, 2),
+        safe_harvest_date=max(harvest_dates) if harvest_dates else None,
+    )
+
+
+@router.delete("/programs/{program_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_spray_program(
+    program_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(require_roles("admin")),
+):
+    """Withdraw a program that was raised in error — planned ones only."""
+    rows = await _program_rows(db, program_id)
+    if rows[0].program_status != "planned":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "An applied program is a record of what went on the crop and cannot "
+            "be deleted.",
+        )
+    for row in rows:
+        await db.delete(row)
+    await db.commit()
 
 
 @router.get("/programs/{program_id}/attachments", response_model=list[SprayAttachmentOut])

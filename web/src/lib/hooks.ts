@@ -66,6 +66,21 @@ const fkey = (f: Filters = {}) =>
     f.scouting_for,
   ].join("|");
 
+/**
+ * Who is signed in, from the client.
+ *
+ * The role lives in an httpOnly cookie the browser cannot read, so a client
+ * page that wants to hide an action it is not allowed to take has to ask.
+ * The server enforces the rule regardless — this only keeps the UI honest.
+ */
+export const useMe = () =>
+  useQuery({
+    queryKey: ["me"],
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    queryFn: () => api.get<Employee>(`${V1}/auth/me`),
+  });
+
 // ── Geofencing ──
 export const useGreenhouses = () =>
   useQuery({ queryKey: ["greenhouses"], queryFn: () => api.get<Greenhouse[]>(`${V1}/greenhouses`) });
@@ -569,32 +584,75 @@ export function useSprayPreview() {
 }
 
 /** Commit a reviewed multi-product program as one application event. */
+/** The fields a program is built from — identical on create and on edit. */
+export interface SprayProgramBody {
+  greenhouse_id?: number | null;
+  bed_code?: string | null;
+  partition_no?: string | null;
+  variety_code?: string | null;
+  type_of_application?: string | null;
+  coverage?: string | null;
+  rei?: string | null;
+  volume_of_water_l?: number | null;
+  comments?: string | null;
+  start_date?: string | null;
+  start_time?: string | null;
+  scout_report_date?: string | null;
+  recommendation_id?: number | null;
+  items: { chemical_id: number; rate?: number | null }[];
+  override?: boolean;
+}
+
+/** Everything a program touches, invalidated together. */
+const SPRAY_KEYS = [
+  "recommendations",
+  "rec-outcomes",
+  "spray",
+  "spray-cost",
+  "compliance",
+  "rounds",
+  "round",
+];
+
 export function useCreateSprayProgram() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: {
-      greenhouse_id?: number | null;
-      bed_code?: string | null;
-      partition_no?: string | null;
-      variety_code?: string | null;
-      type_of_application?: string | null;
-      coverage?: string | null;
-      rei?: string | null;
-      volume_of_water_l?: number | null;
-      comments?: string | null;
-      start_date?: string | null;
-      start_time?: string | null;
-      scout_report_date?: string | null;
-      recommendation_id?: number | null;
-      items: { chemical_id: number; rate?: number | null }[];
-      override?: boolean;
-    }) => api.post<SprayProgramResult>(`${V1}/spray/program`, body),
+    mutationFn: (body: SprayProgramBody) =>
+      api.post<SprayProgramResult>(`${V1}/spray/program`, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["recommendations"] });
-      qc.invalidateQueries({ queryKey: ["rec-outcomes"] });
-      qc.invalidateQueries({ queryKey: ["spray"] });
-      qc.invalidateQueries({ queryKey: ["spray-cost"] });
-      qc.invalidateQueries({ queryKey: ["compliance"] });
+      for (const key of SPRAY_KEYS) qc.invalidateQueries({ queryKey: [key] });
+    },
+  });
+}
+
+/**
+ * Correct a program that has not gone out yet.
+ *
+ * The server refuses this once the program is marked applied — at that point
+ * the chemical is on the crop and a signed sheet is in a file, so the record
+ * has to stay as it was.
+ */
+export function useUpdateSprayProgram() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programId, body }: { programId: string; body: SprayProgramBody }) =>
+      api.put<SprayProgramResult>(
+        `${V1}/spray/programs/${encodeURIComponent(programId)}`,
+        body,
+      ),
+    onSuccess: () => {
+      for (const key of SPRAY_KEYS) qc.invalidateQueries({ queryKey: [key] });
+    },
+  });
+}
+
+export function useDeleteSprayProgram() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (programId: string) =>
+      api.del<void>(`${V1}/spray/programs/${encodeURIComponent(programId)}`),
+    onSuccess: () => {
+      for (const key of SPRAY_KEYS) qc.invalidateQueries({ queryKey: [key] });
     },
   });
 }

@@ -21,10 +21,11 @@ import { isHazardous, money } from "@/lib/format";
 import {
   useChemicals,
   useCreateSprayProgram,
+  useUpdateSprayProgram,
   useGreenhouses,
   useSprayPreview,
 } from "@/lib/hooks";
-import type { ComplianceIssue, SprayPreview } from "@/lib/types";
+import type { ComplianceIssue, SprayPreview, SprayRecord } from "@/lib/types";
 
 const COVERAGES = ["Full Cover", "Top Cover"];
 const APPLICATION_TYPES = [
@@ -63,9 +64,20 @@ export function SprayProgramBuilder({
   onClose,
   context,
   onCreated,
+  editing,
 }: {
   open: boolean;
   onClose: () => void;
+  /**
+   * The program being corrected, if any. Present means edit: the form opens
+   * pre-filled and saves over the same program id, so the approval sheet URL,
+   * the filed attachments and any link from a scouting report all still
+   * resolve to it.
+   */
+  editing?: {
+    programId: string;
+    records: SprayRecord[];
+  } | null;
   context: {
     greenhouseId: number | null;
     greenhouseLabel: string;
@@ -83,6 +95,9 @@ export function SprayProgramBuilder({
   const greenhouses = useGreenhouses();
   const preview = useSprayPreview();
   const createProgram = useCreateSprayProgram();
+  const updateProgram = useUpdateSprayProgram();
+  const isEdit = !!editing;
+  const busy = createProgram.isPending || updateProgram.isPending;
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -140,25 +155,99 @@ export function SprayProgramBuilder({
 
   useEffect(() => {
     if (!open) return;
-    setGreenhouseId(context.greenhouseId);
-    setBedCode(context.bedCode ?? "");
-    setPartition("");
-    setVarietyCode(context.varietyCode ?? "");
-    setScoutReportDate(today);
-    setApplicationType(APPLICATION_TYPES[0]!);
-    setCoverage(COVERAGES[0]!);
-    setRei("");
-    setVolume("1000");
-    setStartDate(today);
-    setStartTime("07:00");
+    const head = editing?.records[0];
+
+    if (head) {
+      // Editing: every field comes off the program as it stands, so a manager
+      // changing one rate does not silently reset the rest of the sheet.
+      setGreenhouseId(head.greenhouse_id);
+      setBedCode(head.bed_code ?? "");
+      setPartition(head.partition_no ?? "");
+      setVarietyCode(head.variety_code ?? "");
+      setScoutReportDate(head.scout_report_date?.slice(0, 10) ?? today);
+      setApplicationType(head.type_of_application ?? APPLICATION_TYPES[0]!);
+      setCoverage(head.coverage ?? COVERAGES[0]!);
+      setRei(head.rei ?? "");
+      setVolume(head.volume_of_water ?? "1000");
+      setStartDate(head.start_date?.slice(0, 10) ?? today);
+      setStartTime(head.start_time ?? "07:00");
+      // A compliance override already recorded on the program stays on,
+      // otherwise saving an unchanged program would be blocked by the very
+      // finding somebody already accepted.
+      setOverride(head.comments?.startsWith("[Compliance override]") ?? false);
+      setComments(
+        (head.comments ?? "").replace(/^\[Compliance override\][^—]*—\s*/, ""),
+      );
+    } else {
+      setGreenhouseId(context.greenhouseId);
+      setBedCode(context.bedCode ?? "");
+      setPartition("");
+      setVarietyCode(context.varietyCode ?? "");
+      setScoutReportDate(today);
+      setApplicationType(APPLICATION_TYPES[0]!);
+      setCoverage(COVERAGES[0]!);
+      setRei("");
+      setVolume("1000");
+      setStartDate(today);
+      setStartTime("07:00");
+      setComments("");
+      setOverride(false);
+    }
+
     setItems([]);
     setPicker("");
     setRateInput("");
-    setComments("");
-    setOverride(false);
     setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, context.recommendationId]);
+  }, [open, context.recommendationId, editing?.programId]);
+
+  /**
+   * Re-price the products of the program being edited.
+   *
+   * The stored rows carry a rate and a cost, but not the compliance verdict or
+   * the buying price the builder needs — and both may have moved since. Asking
+   * the server to preview each product again means the manager is editing
+   * against today's prices and today's rotation history, not a snapshot.
+   */
+  const previewMutate = preview.mutateAsync;
+  useEffect(() => {
+    if (!open || !editing) return;
+    let cancelled = false;
+
+    (async () => {
+      const priced: Item[] = [];
+      for (const r of editing.records) {
+        if (r.chemical_id == null) continue;
+        const rate = Number(r.rate) || 0;
+        try {
+          const result = await previewMutate({
+            chemical_id: r.chemical_id,
+            greenhouse_id: r.greenhouse_id,
+            bed_code: r.bed_code,
+            variety_code: r.variety_code,
+            coverage: r.coverage,
+            start_date: r.start_date,
+            volume_of_water_l: Number(r.volume_of_water) || null,
+            rate,
+          });
+          priced.push({
+            preview: result,
+            rate,
+            qty: result.qty,
+            cost: result.cost_of_chemical,
+          });
+        } catch {
+          // One product that will not price should not empty the whole mix.
+        }
+      }
+      if (!cancelled) setItems(priced);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing?.programId, previewMutate]);
 
   // Pre-fill the recommendation's suggested chemical.
   useEffect(() => {
@@ -251,32 +340,39 @@ export function SprayProgramBuilder({
   const warnings = allIssues.filter((i) => i.level === "warn");
   const infos = allIssues.filter((i) => i.level === "info");
   const canSubmit =
-    items.length > 0 && (blocking.length === 0 || override) && !createProgram.isPending;
+    items.length > 0 && (blocking.length === 0 || override) && !busy;
 
   async function submit() {
     setError(null);
+    const body = {
+      greenhouse_id: greenhouseId,
+      bed_code: bedCode || null,
+      partition_no: partition || null,
+      variety_code: varietyCode || null,
+      type_of_application: applicationType,
+      coverage,
+      rei: rei || null,
+      volume_of_water_l: volumeNum || null,
+      comments: comments || null,
+      start_date: startDate,
+      start_time: startTime || null,
+      scout_report_date: scoutReportDate || null,
+      recommendation_id: context.recommendationId ?? null,
+      items: items.map((i) => ({ chemical_id: i.preview.chemical_id, rate: i.rate })),
+      override,
+    };
     try {
-      const result = await createProgram.mutateAsync({
-        greenhouse_id: greenhouseId,
-        bed_code: bedCode || null,
-        partition_no: partition || null,
-        variety_code: varietyCode || null,
-        type_of_application: applicationType,
-        coverage,
-        rei: rei || null,
-        volume_of_water_l: volumeNum || null,
-        comments: comments || null,
-        start_date: startDate,
-        start_time: startTime || null,
-        scout_report_date: scoutReportDate || null,
-        recommendation_id: context.recommendationId ?? null,
-        items: items.map((i) => ({ chemical_id: i.preview.chemical_id, rate: i.rate })),
-        override,
-      });
+      const result = editing
+        ? await updateProgram.mutateAsync({ programId: editing.programId, body })
+        : await createProgram.mutateAsync(body);
       onCreated?.(result.program_id);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create the program.");
+      setError(
+        e instanceof Error
+          ? e.message
+          : `Could not ${isEdit ? "save" : "create"} the program.`,
+      );
     }
   }
 
@@ -285,7 +381,9 @@ export function SprayProgramBuilder({
       <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-line px-6 py-4">
           <div>
-            <h2 className="text-lg font-bold text-ink">New spray program</h2>
+            <h2 className="text-lg font-bold text-ink">
+              {isEdit ? "Edit spray program" : "New spray program"}
+            </h2>
             <p className="mt-0.5 text-sm text-ink-faint">
               {context.targetLabel ? (
                 <>
@@ -619,13 +717,14 @@ export function SprayProgramBuilder({
               Cancel
             </Button>
             <Button onClick={submit} disabled={!canSubmit}>
-              {createProgram.isPending ? (
+              {busy ? (
                 <>
-                  <Loader2 size={15} className="animate-spin" /> Creating…
+                  <Loader2 size={15} className="animate-spin" />{" "}
+                  {isEdit ? "Saving…" : "Creating…"}
                 </>
               ) : (
                 <>
-                  <Beaker size={15} /> Create program
+                  <Beaker size={15} /> {isEdit ? "Save changes" : "Create program"}
                   {items.length > 1 && ` (${items.length})`}
                 </>
               )}
