@@ -1,6 +1,7 @@
 """FastAPI application factory & lifespan wiring."""
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -55,6 +56,16 @@ async def lifespan(_: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         for stmt in _COLUMN_MIGRATIONS:
             await conn.exec_driver_sql(stmt)
+    # Say at boot which optional integrations are closed. Without this the
+    # first symptom is a scout in a greenhouse getting a 503 on submit, which
+    # is the worst possible place to discover a missing environment variable.
+    if not settings.integration_api_key:
+        logging.getLogger("uvicorn.error").warning(
+            "INTEGRATION_API_KEY is not set — the Credible Blooms scouting "
+            "integration is closed and will answer 503. Set it in .env and "
+            "restart to enable it."
+        )
+
     if settings.seed_on_startup:
         async with AsyncSessionLocal() as db:
             await seed_if_empty(db)
