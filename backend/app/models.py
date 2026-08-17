@@ -779,6 +779,9 @@ class FertigationTank(Base):
     )
     code: Mapped[str] = mapped_column(String(10), nullable=False)
     volume_l: Mapped[float] = mapped_column(Float, default=1000.0)
+    # 'auto'  — derived from the water volume and the injection rate
+    # 'manual' — the operator confirmed a different approved count
+    sets_mode: Mapped[str] = mapped_column(String(10), default="auto")
     sets: Mapped[float] = mapped_column(Float, default=1.0)
     note: Mapped[str | None] = mapped_column(String(200))
 
@@ -805,6 +808,9 @@ class FertigationLine(Base):
     fertiliser_name: Mapped[str | None] = mapped_column(String(150))
     quantity: Mapped[float] = mapped_column(Float, default=0.0)
     unit: Mapped[str] = mapped_column(String(10), default="kg")
+    # Denormalised from the register: which injection rate this tank is dosed
+    # at must not depend on what the tank happens to be called.
+    is_acid: Mapped[bool] = mapped_column(Boolean, default=False)
     unit_price: Mapped[float | None] = mapped_column(Float)
     cost: Mapped[float | None] = mapped_column(Float)
     position: Mapped[int] = mapped_column(Integer, default=0)

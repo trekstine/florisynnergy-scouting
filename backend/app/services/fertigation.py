@@ -22,11 +22,14 @@ from typing import Iterable, Protocol
 class _Line(Protocol):
     quantity: float
     unit_price: float | None
+    is_acid: bool
 
 
 class _Tank(Protocol):
+    code: str
     volume_l: float
     sets: float
+    sets_mode: str
     lines: list
 
 
@@ -49,6 +52,37 @@ def sets_for(stock_l: float, tank_volume_l: float) -> float:
     return round(stock_l / tank_volume_l, 3)
 
 
+def is_acid_tank(tank: _Tank) -> bool:
+    """Is this tank dosed at the acid rate?
+
+    Decided by what is in it, not by what it is called. The supplied sheet
+    happens to put acids in "Tank C", but a farm with two acid tanks, or one
+    that letters them differently, must still get the right rate.
+    """
+    return any(getattr(line, "is_acid", False) for line in tank.lines)
+
+
+def implied_sets(tank: _Tank, stock_l: float, acid_l: float) -> float:
+    """The set count the water volume calls for, at this tank's own volume."""
+    return sets_for(acid_l if is_acid_tank(tank) else stock_l, tank.volume_l)
+
+
+def effective_sets(tank: _Tank, stock_l: float, acid_l: float) -> float:
+    """The set count actually in force — the one costing must use.
+
+    Two numbers that should agree is how a sheet ends up lying: the operator
+    types 1, the water volume implies 5, and the cost silently follows the
+    typed figure. So the derived value governs unless somebody has explicitly
+    said otherwise, and the sheet shows both when they differ.
+    """
+    if getattr(tank, "sets_mode", "auto") == "manual":
+        return max(float(tank.sets or 0), 0.0)
+    derived = implied_sets(tank, stock_l, acid_l)
+    # Nothing to derive from yet — fall back to whatever is on the record so a
+    # part-filled draft still costs something sensible.
+    return derived if derived > 0 else max(float(tank.sets or 0), 0.0)
+
+
 def line_cost(quantity: float, sets: float, unit_price: float | None) -> float | None:
     """What one fertiliser costs across every set made up.
 
@@ -61,17 +95,48 @@ def line_cost(quantity: float, sets: float, unit_price: float | None) -> float |
     return round(quantity * max(sets, 0) * unit_price, 2)
 
 
-def tank_cost(tank: _Tank) -> float:
+def tank_cost(tank: _Tank, sets: float | None = None) -> float:
+    """What this tank costs across the sets actually being made up."""
+    n = tank.sets if sets is None else sets
     total = 0.0
     for line in tank.lines:
-        c = line_cost(line.quantity, tank.sets, line.unit_price)
+        c = line_cost(line.quantity, n, line.unit_price)
         if c:
             total += c
     return round(total, 2)
 
 
-def total_cost(tanks: Iterable[_Tank]) -> float:
-    return round(sum(tank_cost(t) for t in tanks), 2)
+def total_cost(tanks: Iterable[_Tank], stock_l: float = 0.0, acid_l: float = 0.0) -> float:
+    return round(
+        sum(tank_cost(t, effective_sets(t, stock_l, acid_l)) for t in tanks), 2
+    )
+
+
+def sources_total_m3(sources: Iterable) -> float:
+    """Water accounted for by the recorded sources."""
+    return round(sum(float(getattr(s, "volume_m3", 0) or 0) for s in sources), 2)
+
+
+def source_mismatch(volume_m3: float | None, sources: Iterable) -> str | None:
+    """Does the source breakdown add up to the water that went on?
+
+    Not an error — a farm may record only the borehole and leave the rest — but
+    a silent difference between "835 m³ applied" and sources totalling 500 is
+    exactly the sort of thing nobody notices until an audit.
+    """
+    listed = list(sources)
+    if not volume_m3 or not listed:
+        return None
+    total = sources_total_m3(listed)
+    if total <= 0:
+        return None
+    diff = round(total - volume_m3, 2)
+    if abs(diff) < 0.5:  # rounding on a meter, not a discrepancy
+        return None
+    return (
+        f"Water sources total {total} m³ against {volume_m3} m³ applied "
+        f"({'+' if diff > 0 else ''}{diff} m³)."
+    )
 
 
 def m3_per_ha(volume_m3: float | None, area_ha: float | None) -> float | None:

@@ -1153,6 +1153,7 @@ class FertigationLineOut(FertigationLineIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    is_acid: bool = False
     unit_price: float | None = None
     cost: float | None = None
 
@@ -1160,6 +1161,9 @@ class FertigationLineOut(FertigationLineIn):
 class FertigationTankIn(BaseModel):
     code: str = Field(max_length=10)
     volume_l: float = 1000.0
+    # "auto" derives the set count from the water volume; "manual" means the
+    # operator confirmed a different approved count.
+    sets_mode: Literal["auto", "manual"] = "auto"
     sets: float = 1.0
     note: str | None = Field(default=None, max_length=200)
     lines: list[FertigationLineIn] = []
@@ -1171,10 +1175,17 @@ class FertigationTankOut(BaseModel):
     id: int
     code: str
     volume_l: float
+    sets_mode: str = "auto"
+    # What is on the record. `effective_sets` is what the figures actually use.
     sets: float
     note: str | None = None
     lines: list[FertigationLineOut] = []
-    # Quantity × sets, summed — what actually leaves the store for this tank.
+    # The count the water volume calls for, and the one in force. They differ
+    # only when somebody has overridden the derivation.
+    implied_sets: float = 0.0
+    effective_sets: float = 0.0
+    is_acid_tank: bool = False
+    # Quantity × effective sets, summed — what leaves the store for this tank.
     total_cost: float = 0.0
 
 
@@ -1250,4 +1261,8 @@ class FertigationOut(BaseModel):
     stock_required_l: float = 0.0
     acid_required_l: float = 0.0
     m3_per_ha: float | None = None
+    # What the recorded sources add up to, and a note when that disagrees with
+    # the water applied.
+    sources_total_m3: float = 0.0
+    source_note: str | None = None
     signature_count: int = 0

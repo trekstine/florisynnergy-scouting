@@ -38,9 +38,9 @@ const APPLICATION_TYPES = ["Drip", "Drench", "Overhead", "Flush"];
 /** Two mixing tanks and an acid tank — the shape of the supplied sheet. */
 function defaultTanks(): FertigationTank[] {
   return [
-    { code: "A", volume_l: 1000, sets: 1, note: null, lines: [] },
-    { code: "B", volume_l: 1000, sets: 1, note: null, lines: [] },
-    { code: "C", volume_l: 500, sets: 1, note: null, lines: [] },
+    { code: "A", volume_l: 1000, sets_mode: "auto", sets: 1, note: null, lines: [] },
+    { code: "B", volume_l: 1000, sets_mode: "auto", sets: 1, note: null, lines: [] },
+    { code: "C", volume_l: 500, sets_mode: "auto", sets: 1, note: null, lines: [] },
   ];
 }
 
@@ -132,27 +132,49 @@ export function FertigationBuilder({
   const derived = useMemo(() => {
     const stock = Math.round(volumeNum * fertRateNum * 100) / 100;
     const acid = Math.round(volumeNum * acidRateNum * 100) / 100;
+
+    // A tank is dosed at the acid rate because of what is in it, not because
+    // of what it is called — a farm may letter its acid tank anything.
+    const isAcidTank = (t: FertigationTank) =>
+      t.lines.some((l) => l.is_acid && l.quantity >= 0);
+    const impliedSets = (t: FertigationTank) =>
+      t.volume_l > 0
+        ? Math.round(((isAcidTank(t) ? acid : stock) / t.volume_l) * 1000) / 1000
+        : 0;
+    // The number the costing uses. Derived unless somebody overrode it.
+    const effectiveSets = (t: FertigationTank) => {
+      if (t.sets_mode === "manual") return Math.max(t.sets, 0);
+      const d = impliedSets(t);
+      return d > 0 ? d : Math.max(t.sets, 0);
+    };
+
     const cost = tanks.reduce(
       (s, t) =>
         s +
         t.lines.reduce(
-          (ls, l) => ls + (l.unit_price ?? 0) * l.quantity * Math.max(t.sets, 0),
+          (ls, l) => ls + (l.unit_price ?? 0) * l.quantity * effectiveSets(t),
           0,
         ),
       0,
     );
+    const sourcesTotal =
+      Math.round(sources.reduce((s, x) => s + (x.volume_m3 ?? 0), 0) * 100) / 100;
+
     return {
       stock,
       acid,
       cost: Math.round(cost * 100) / 100,
       perHa: areaNum ? Math.round((volumeNum / areaNum) * 100) / 100 : null,
-      // What the stock requirement implies at each tank's own volume.
-      setsFor: (t: FertigationTank) =>
-        t.volume_l > 0
-          ? Math.round(((t.code === "C" ? acid : stock) / t.volume_l) * 1000) / 1000
-          : 0,
+      isAcidTank,
+      impliedSets,
+      effectiveSets,
+      sourcesTotal,
+      sourceGap:
+        volumeNum > 0 && sourcesTotal > 0 && Math.abs(sourcesTotal - volumeNum) >= 0.5
+          ? Math.round((sourcesTotal - volumeNum) * 100) / 100
+          : null,
     };
-  }, [volumeNum, areaNum, fertRateNum, acidRateNum, tanks]);
+  }, [volumeNum, areaNum, fertRateNum, acidRateNum, tanks, sources]);
 
   /** Calcium and sulphate in one tank will precipitate — say so while it can
    *  still be fixed, rather than at the drippers. */
@@ -200,6 +222,7 @@ export function FertigationBuilder({
                       quantity: 0,
                       unit: f.unit,
                       position: t.lines.length,
+                      is_acid: f.is_acid,
                       unit_price: f.price_per_unit,
                     },
                   ],
@@ -266,6 +289,7 @@ export function FertigationBuilder({
         .map((t) => ({
           code: t.code,
           volume_l: t.volume_l,
+          sets_mode: t.sets_mode ?? "auto",
           sets: t.sets,
           note: t.note,
           lines: t.lines.map((l, i) => ({
@@ -378,7 +402,7 @@ export function FertigationBuilder({
                   ))}
                 </Select>
               </Field>
-              <Field label="Water volume (m³)">
+              <Field label="Total water applied (m³)">
                 <TextInput
                   type="number"
                   min={0}
@@ -434,6 +458,12 @@ export function FertigationBuilder({
               </Field>
             </div>
 
+            <p className="mt-2 text-xs text-ink-faint">
+              Total water applied is the one figure everything else derives
+              from: the stock and acid solution, every tank&apos;s set count, and
+              the cost.
+            </p>
+
             {/* Everything the water volume implies, before anything is saved. */}
             <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-4">
               <Derived label="Stock solution" value={`${derived.stock} L`} />
@@ -464,10 +494,54 @@ export function FertigationBuilder({
                 <Plus size={12} /> Add a source
               </button>
             </div>
+            <p className="mb-2 text-xs text-ink-faint">
+              Where the {volumeNum ? `${volumeNum} m³` : "water"} above came from.
+              These are a breakdown of that total, not extra water — EC and pH
+              sit here because borehole and river differ, and averaging them
+              hides why the acid dose changed.
+            </p>
+
+            {sources.length > 0 && (
+              <div
+                className={`mb-2 rounded-lg border px-3 py-2 text-xs ${
+                  derived.sourceGap
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : "border-line bg-surface text-ink-faint"
+                }`}
+              >
+                Sources total{" "}
+                <strong className="tabular-nums">{derived.sourcesTotal} m³</strong>
+                {volumeNum > 0 && (
+                  <>
+                    {" "}against <strong className="tabular-nums">{volumeNum} m³</strong>{" "}
+                    applied
+                    {derived.sourceGap ? (
+                      <>
+                        {" — "}
+                        <strong>
+                          {derived.sourceGap > 0 ? "+" : ""}
+                          {derived.sourceGap} m³ difference
+                        </strong>
+                        .{" "}
+                        <button
+                          type="button"
+                          onClick={() => setVolume(String(derived.sourcesTotal))}
+                          className="font-semibold underline"
+                        >
+                          Use the source total
+                        </button>
+                      </>
+                    ) : (
+                      " — they agree."
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {sources.length === 0 ? (
               <p className="rounded-lg border border-dashed border-line px-3 py-3 text-xs text-ink-faint">
-                EC and pH are recorded per source. Borehole and river water differ,
-                and averaging them hides why the acid dose changed.
+                None recorded. Optional — the sheet works on the total alone.
               </p>
             ) : (
               <div className="space-y-2">
@@ -579,33 +653,75 @@ export function FertigationBuilder({
                         />
                       </Field>
                     </div>
-                    <div className="w-24">
+                    {/* Sets are derived from the water volume by default.
+                        Two editable numbers that ought to agree is how a sheet
+                        ends up lying — so the derivation governs unless
+                        somebody explicitly takes it over. */}
+                    <div className="w-40">
                       <Field label="Sets">
-                        <TextInput
-                          type="number"
-                          min={0}
-                          step="0.1"
-                          value={tank.sets}
-                          onChange={(e) =>
-                            setTank(ti, { sets: Number(e.target.value) || 0 })
-                          }
-                        />
+                        <span className="flex items-center gap-1.5">
+                          {tank.sets_mode === "manual" ? (
+                            <TextInput
+                              type="number"
+                              min={0}
+                              step="0.1"
+                              value={tank.sets}
+                              onChange={(e) =>
+                                setTank(ti, { sets: Number(e.target.value) || 0 })
+                              }
+                              className="!w-20"
+                            />
+                          ) : (
+                            <span className="rounded-lg border border-line bg-white px-2.5 py-2 text-sm font-semibold tabular-nums text-ink">
+                              {derived.impliedSets(tank) || "—"}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setTank(ti, {
+                                sets_mode:
+                                  tank.sets_mode === "manual" ? "auto" : "manual",
+                                sets:
+                                  tank.sets_mode === "manual"
+                                    ? tank.sets
+                                    : derived.impliedSets(tank) || tank.sets,
+                              })
+                            }
+                            className="text-[11px] font-semibold text-brand-700 hover:underline"
+                          >
+                            {tank.sets_mode === "manual" ? "use calculated" : "override"}
+                          </button>
+                        </span>
                       </Field>
                     </div>
-                    {volumeNum > 0 && (
-                      <span className="pb-2 text-xs text-ink-faint">
-                        the water volume implies{" "}
-                        <strong className="text-ink-soft">
-                          {derived.setsFor(tank)}
-                        </strong>{" "}
-                        sets
-                      </span>
-                    )}
+
+                    <span className="pb-2 text-xs text-ink-faint">
+                      {volumeNum > 0 ? (
+                        <>
+                          {(derived.isAcidTank(tank)
+                            ? derived.acid
+                            : derived.stock
+                          ).toLocaleString()}{" "}
+                          L {derived.isAcidTank(tank) ? "acid" : "stock"} ÷{" "}
+                          {tank.volume_l} L
+                          {tank.sets_mode === "manual" &&
+                            derived.impliedSets(tank) !== tank.sets && (
+                              <strong className="ml-1 text-amber-700">
+                                = {derived.impliedSets(tank)}, overridden
+                              </strong>
+                            )}
+                        </>
+                      ) : (
+                        "enter a water volume to calculate"
+                      )}
+                    </span>
+
                     <span className="ml-auto pb-2 text-sm font-semibold tabular-nums text-ink">
                       {money(
                         tank.lines.reduce(
                           (s, l) =>
-                            s + (l.unit_price ?? 0) * l.quantity * Math.max(tank.sets, 0),
+                            s + (l.unit_price ?? 0) * l.quantity * derived.effectiveSets(tank),
                           0,
                         ),
                       )}
@@ -622,7 +738,7 @@ export function FertigationBuilder({
                               Qty per tank
                             </th>
                             <th className="pb-1.5 text-right font-semibold">
-                              × {tank.sets || 0} sets
+                              × {derived.effectiveSets(tank) || 0} sets
                             </th>
                             <th className="pb-1.5 text-right font-semibold">Cost</th>
                             <th />
@@ -658,7 +774,7 @@ export function FertigationBuilder({
                               </td>
                               <td className="py-1.5 text-right tabular-nums text-ink-soft">
                                 {Math.round(
-                                  line.quantity * Math.max(tank.sets, 0) * 1000,
+                                  line.quantity * derived.effectiveSets(tank) * 1000,
                                 ) / 1000}{" "}
                                 {line.unit}
                               </td>
@@ -667,7 +783,7 @@ export function FertigationBuilder({
                                   ? money(
                                       line.unit_price *
                                         line.quantity *
-                                        Math.max(tank.sets, 0),
+                                        derived.effectiveSets(tank),
                                     )
                                   : "—"}
                               </td>

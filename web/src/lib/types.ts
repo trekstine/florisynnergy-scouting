@@ -621,6 +621,7 @@ export interface FertigationLine {
   quantity: number;
   unit: string;
   position: number;
+  is_acid?: boolean;
   unit_price?: number | null;
   cost?: number | null;
 }
@@ -629,9 +630,15 @@ export interface FertigationTank {
   id?: number;
   code: string;
   volume_l: number;
+  /** "auto" derives sets from the water volume; "manual" is an override. */
+  sets_mode?: "auto" | "manual";
   sets: number;
   note: string | null;
   lines: FertigationLine[];
+  /** What the water volume calls for, and what the figures actually use. */
+  implied_sets?: number;
+  effective_sets?: number;
+  is_acid_tank?: boolean;
   total_cost?: number;
 }
 
@@ -673,6 +680,9 @@ export interface Fertigation {
   stock_required_l: number;
   acid_required_l: number;
   m3_per_ha: number | null;
+  sources_total_m3: number;
+  /** Set when the recorded sources do not add up to the water applied. */
+  source_note: string | null;
   signature_count: number;
 }
 
@@ -696,6 +706,7 @@ export interface FertigationBody {
   tanks: {
     code: string;
     volume_l: number;
+    sets_mode: "auto" | "manual";
     sets: number;
     note?: string | null;
     lines: {

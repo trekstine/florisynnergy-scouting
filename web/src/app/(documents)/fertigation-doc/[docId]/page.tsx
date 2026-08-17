@@ -39,8 +39,6 @@ export default function FertigationDocPage() {
   }
 
   const f = q.data;
-  const setsFor = (volume: number, tankVolume: number) =>
-    tankVolume > 0 ? Math.round((volume / tankVolume) * 1000) / 1000 : 0;
 
   return (
     <div className="min-h-screen bg-surface py-8 print:bg-white print:py-0">
@@ -87,7 +85,7 @@ export default function FertigationDocPage() {
           <Kv label="Phase" value={f.phase ?? "—"} />
           <Kv label="Type of application" value={f.type_of_application ?? "—"} />
           <Kv
-            label="Water volume"
+            label="Total water applied"
             value={f.volume_m3 != null ? `${f.volume_m3} m³` : "—"}
             strong
           />
@@ -107,6 +105,14 @@ export default function FertigationDocPage() {
             <Kv label="Acid injection" value={`${f.acid_rate_l_m3} L per m³`} />
             <Kv label="Acid solution" value={`${f.acid_required_l} L`} strong />
           </div>
+          {f.volume_m3 != null && (
+            <p className="mt-2 text-[10px] text-ink-faint">
+              {f.volume_m3} m³ × {f.fertiliser_rate_l_m3} L/m³ ={" "}
+              {f.stock_required_l} L stock solution · {f.volume_m3} m³ ×{" "}
+              {f.acid_rate_l_m3} L/m³ = {f.acid_required_l} L acid. Each tank&apos;s
+              set count is that figure divided by the tank&apos;s own volume.
+            </p>
+          )}
         </Section>
 
         {/* Water sources */}
@@ -135,7 +141,23 @@ export default function FertigationDocPage() {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr className="border-t border-ink">
+                  <td className="py-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                    Total
+                  </td>
+                  <td className="py-1.5 text-right font-bold tabular-nums text-ink">
+                    {f.sources_total_m3} m³
+                  </td>
+                  <td colSpan={3} />
+                </tr>
+              </tfoot>
             </table>
+            {f.source_note && (
+              <p className="mt-1.5 text-[10px] font-semibold text-amber-800">
+                {f.source_note}
+              </p>
+            )}
           </Section>
         )}
 
@@ -143,7 +165,7 @@ export default function FertigationDocPage() {
         {f.tanks.map((tank) => (
           <Section
             key={tank.id ?? tank.code}
-            title={`Tank ${tank.code} — ${tank.volume_l} L${tank.sets !== 1 ? ` × ${tank.sets} sets` : ""}`}
+            title={`Tank ${tank.code} — ${tank.volume_l} L × ${tank.effective_sets ?? tank.sets} set${(tank.effective_sets ?? tank.sets) === 1 ? "" : "s"}${tank.is_acid_tank ? " (acid)" : ""}`}
           >
             <table className="w-full text-xs">
               <thead>
@@ -152,7 +174,8 @@ export default function FertigationDocPage() {
                   <th className="py-1.5 font-semibold">Fertiliser</th>
                   <th className="py-1.5 text-right font-semibold">Per tank</th>
                   <th className="py-1.5 text-right font-semibold">
-                    Total ({tank.sets} set{tank.sets === 1 ? "" : "s"})
+                    Total ({tank.effective_sets ?? tank.sets} set
+                    {(tank.effective_sets ?? tank.sets) === 1 ? "" : "s"})
                   </th>
                   <th className="py-1.5 text-right font-semibold">Cost</th>
                   <th className="py-1.5 w-28 font-semibold">Actual issued</th>
@@ -176,7 +199,10 @@ export default function FertigationDocPage() {
                       {line.quantity} {line.unit}
                     </td>
                     <td className="py-1.5 text-right font-semibold tabular-nums text-ink">
-                      {Math.round(line.quantity * tank.sets * 1000) / 1000} {line.unit}
+                      {Math.round(
+                        line.quantity * (tank.effective_sets ?? tank.sets) * 1000,
+                      ) / 1000}{" "}
+                      {line.unit}
                     </td>
                     <td className="py-1.5 text-right tabular-nums">
                       {line.cost != null ? money(line.cost) : "—"}
@@ -203,12 +229,17 @@ export default function FertigationDocPage() {
             </table>
             {f.volume_m3 != null && (
               <p className="mt-1.5 text-[10px] text-ink-faint">
-                The water volume implies{" "}
-                {setsFor(
-                  tank.code === "C" ? f.acid_required_l : f.stock_required_l,
-                  tank.volume_l,
-                )}{" "}
-                sets at {tank.volume_l} L. {tank.sets} recorded.
+                {tank.is_acid_tank ? f.acid_required_l : f.stock_required_l} L{" "}
+                {tank.is_acid_tank ? "acid" : "stock"} ÷ {tank.volume_l} L ={" "}
+                {tank.implied_sets} sets
+                {tank.sets_mode === "manual" &&
+                  tank.implied_sets !== tank.effective_sets && (
+                    <strong className="text-amber-800">
+                      {" "}
+                      — overridden to {tank.effective_sets}
+                    </strong>
+                  )}
+                .
               </p>
             )}
           </Section>

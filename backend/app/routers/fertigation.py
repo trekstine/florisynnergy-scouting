@@ -119,18 +119,29 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
     )
     preparer = await db.get(Employee, row.prepared_by) if row.prepared_by else None
 
-    tanks = [
-        FertigationTankOut(
-            id=t.id,
-            code=t.code,
-            volume_l=t.volume_l,
-            sets=t.sets,
-            note=t.note,
-            lines=[FertigationLineOut.model_validate(x) for x in t.lines],
-            total_cost=calc.tank_cost(t),
+    # Derived once, here, so the list, the detail and the document cannot
+    # disagree about how many sets a tank is making up.
+    stock_l = calc.stock_required_l(row.volume_m3, row.fertiliser_rate_l_m3)
+    acid_l = calc.stock_required_l(row.volume_m3, row.acid_rate_l_m3)
+
+    tanks = []
+    for t in sorted(row.tanks, key=lambda t: t.code):
+        effective = calc.effective_sets(t, stock_l, acid_l)
+        tanks.append(
+            FertigationTankOut(
+                id=t.id,
+                code=t.code,
+                volume_l=t.volume_l,
+                sets_mode=t.sets_mode,
+                sets=t.sets,
+                note=t.note,
+                lines=[FertigationLineOut.model_validate(x) for x in t.lines],
+                implied_sets=calc.implied_sets(t, stock_l, acid_l),
+                effective_sets=effective,
+                is_acid_tank=calc.is_acid_tank(t),
+                total_cost=calc.tank_cost(t, effective),
+            )
         )
-        for t in sorted(row.tanks, key=lambda t: t.code)
-    ]
 
     return FertigationOut(
         id=row.id,
@@ -157,10 +168,12 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
         created_at=row.created_at,
         tanks=tanks,
         sources=[FertigationSourceOut.model_validate(s) for s in row.sources],
-        total_cost=calc.total_cost(row.tanks),
-        stock_required_l=calc.stock_required_l(row.volume_m3, row.fertiliser_rate_l_m3),
-        acid_required_l=calc.stock_required_l(row.volume_m3, row.acid_rate_l_m3),
+        total_cost=calc.total_cost(row.tanks, stock_l, acid_l),
+        stock_required_l=stock_l,
+        acid_required_l=acid_l,
         m3_per_ha=calc.m3_per_ha(row.volume_m3, row.area_ha),
+        sources_total_m3=calc.sources_total_m3(row.sources),
+        source_note=calc.source_mismatch(row.volume_m3, row.sources),
         signature_count=await _signature_count(db, row.doc_id),
     )
 
@@ -183,33 +196,43 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
         gh = await db.get(Greenhouse, row.greenhouse_id)
         row.area_ha = getattr(gh, "area_ha", None) if gh else None
 
-    prices = {
-        f.id: (f.price_per_unit, f.name, f.unit)
-        for f in (await db.execute(select(Fertiliser))).scalars()
+    register = {
+        f.id: f for f in (await db.execute(select(Fertiliser))).scalars()
     }
+
+    stock_l = calc.stock_required_l(row.volume_m3, row.fertiliser_rate_l_m3)
+    acid_l = calc.stock_required_l(row.volume_m3, row.acid_rate_l_m3)
 
     row.tanks.clear()
     for tank_in in payload.tanks:
         tank = FertigationTank(
             code=tank_in.code.strip().upper(),
             volume_l=tank_in.volume_l,
+            sets_mode=tank_in.sets_mode,
             sets=tank_in.sets,
             note=tank_in.note,
         )
         for i, line_in in enumerate(tank_in.lines):
-            price, name, unit = prices.get(line_in.fertiliser_id or -1, (None, None, None))
+            f = register.get(line_in.fertiliser_id or -1)
             tank.lines.append(
                 FertigationLine(
                     fertiliser_id=line_in.fertiliser_id,
                     fertiliser_code=line_in.fertiliser_code.strip().upper(),
-                    fertiliser_name=line_in.fertiliser_name or name,
+                    fertiliser_name=line_in.fertiliser_name or (f.name if f else None),
                     quantity=line_in.quantity,
-                    unit=line_in.unit or unit or "kg",
-                    unit_price=price,
-                    cost=calc.line_cost(line_in.quantity, tank_in.sets, price),
+                    unit=line_in.unit or (f.unit if f else None) or "kg",
+                    is_acid=bool(f.is_acid) if f else False,
+                    unit_price=f.price_per_unit if f else None,
                     position=line_in.position or i,
                 )
             )
+        # Costed after the lines are attached, because whether this is an acid
+        # tank — and so which rate its set count derives from — depends on what
+        # is in it.
+        sets = calc.effective_sets(tank, stock_l, acid_l)
+        tank.sets = sets
+        for line in tank.lines:
+            line.cost = calc.line_cost(line.quantity, sets, line.unit_price)
         row.tanks.append(tank)
 
     row.sources.clear()
