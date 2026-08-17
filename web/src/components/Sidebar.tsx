@@ -3,6 +3,7 @@
 import {
   Bug,
   ClipboardList,
+  Droplets,
   FileText,
   LayoutDashboard,
   Map,
@@ -38,6 +39,7 @@ const GROUPS: {
       { href: "/scouting/rounds", label: "Scouting Reports", icon: FileText },
       { href: "/recommendations", label: "Recommendations", icon: Bug },
       { href: "/spray", label: "Spray Programs", icon: SprayCan },
+      { href: "/fertigation", label: "Fertigation", icon: Droplets },
     ],
   },
   {

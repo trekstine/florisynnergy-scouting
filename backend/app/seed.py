@@ -19,6 +19,7 @@ from .models import (
     Disease,
     Employee,
     Farm,
+    Fertiliser,
     Greenhouse,
     Pest,
     Recommendation,
@@ -139,6 +140,62 @@ def _rand_point_in(ring: list[list[float]], rng: random.Random) -> tuple[float, 
             return lng, lat
     c = centroid(pts)
     return c[0], c[1]
+
+
+# The salts on the supplied Credible Blooms regime sheet, with the tank each
+# normally sits in. Analyses are the standard grades; prices are placeholders a
+# farm overwrites from its own invoices.
+FERTILISERS = [
+    # code,      name,                       formula,   tank, acid,  N,    P,    K,    Ca,   Mg,   S,    price
+    ("CANO3",    "Calcium nitrate",          "Ca(NO3)2", "A", False, 15.5, 0,    0,    19.0, 0,    0,    95.0),
+    ("KNO3",     "Potassium nitrate",        "KNO3",     "A", False, 13.0, 0,    38.0, 0,    0,    0,    180.0),
+    ("MGSO4",    "Magnesium sulphate",       "MgSO4",    "B", False, 0,    0,    0,    0,    9.8,  13.0, 55.0),
+    ("MGNO3",    "Magnesium nitrate",        "Mg(NO3)2", "B", False, 11.0, 0,    0,    0,    9.5,  0,    140.0),
+    ("MKP",      "Mono potassium phosphate", "KH2PO4",   "B", False, 0,    22.7, 28.2, 0,    0,    0,    320.0),
+    ("NA2MO2",   "Sodium molybdate",         "Na2MoO4",  "B", False, 0,    0,    0,    0,    0,    0,    2800.0),
+    ("CUSO4",    "Copper sulphate",          "CuSO4",    "B", False, 0,    0,    0,    0,    0,    12.8, 650.0),
+    ("ZNSO4",    "Zinc sulphate",            "ZnSO4",    "B", False, 0,    0,    0,    0,    0,    11.0, 420.0),
+    ("BORAX",    "Borax",                    "Na2B4O7",  "B", False, 0,    0,    0,    0,    0,    0,    260.0),
+    ("MNSO4",    "Manganese sulphate",       "MnSO4",    "B", False, 0,    0,    0,    0,    0,    18.0, 380.0),
+    ("H2SO4",    "Sulphuric acid",           "H2SO4",    "C", True,  0,    0,    0,    0,    0,    32.7, 110.0),
+    ("H3PO4",    "Phosphoric acid",          "H3PO4",    "C", True,  0,    31.6, 0,    0,    0,    0,    240.0),
+]
+
+
+async def seed_fertilisers(db: AsyncSession) -> int:
+    """Stock the fertiliser register, skipping anything already there.
+
+    Runs independently of the demo farm seed so an existing deployment picks
+    the register up on its next boot without a reseed.
+    """
+    existing = set(
+        (await db.execute(select(Fertiliser.code))).scalars().all()
+    )
+    added = 0
+    for (code, name, formula, tank, acid, n, p, k, ca, mg, s_, price) in FERTILISERS:
+        if code in existing:
+            continue
+        db.add(
+            Fertiliser(
+                code=code,
+                name=name,
+                formula=formula,
+                unit="kg",
+                price_per_unit=price,
+                default_tank=tank,
+                is_acid=acid,
+                pct_n=n or None,
+                pct_p=p or None,
+                pct_k=k or None,
+                pct_ca=ca or None,
+                pct_mg=mg or None,
+                pct_s=s_ or None,
+            )
+        )
+        added += 1
+    if added:
+        await db.commit()
+    return added
 
 
 async def seed_if_empty(db: AsyncSession) -> bool:

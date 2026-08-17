@@ -590,3 +590,122 @@ export interface ApprovalState {
   signed_count: number;
   required_count: number;
 }
+
+// ── Fertigation ─────────────────────────────────────────────────────────────
+export type FertActivity = "fertigation" | "drenching" | "flushing";
+export type FertStatus = "draft" | "issued" | "completed" | "cancelled";
+
+export interface Fertiliser {
+  id: number;
+  code: string;
+  name: string;
+  formula: string | null;
+  unit: string;
+  price_per_unit: number | null;
+  default_tank: string | null;
+  is_acid: boolean;
+  pct_n: number | null;
+  pct_p: number | null;
+  pct_k: number | null;
+  pct_ca: number | null;
+  pct_mg: number | null;
+  pct_s: number | null;
+  is_active: boolean;
+}
+
+export interface FertigationLine {
+  id?: number;
+  fertiliser_id: number | null;
+  fertiliser_code: string;
+  fertiliser_name: string | null;
+  quantity: number;
+  unit: string;
+  position: number;
+  unit_price?: number | null;
+  cost?: number | null;
+}
+
+export interface FertigationTank {
+  id?: number;
+  code: string;
+  volume_l: number;
+  sets: number;
+  note: string | null;
+  lines: FertigationLine[];
+  total_cost?: number;
+}
+
+export interface FertigationSource {
+  id?: number;
+  source: string;
+  volume_m3: number | null;
+  ec: number | null;
+  ph: number | null;
+  note: string | null;
+}
+
+export interface Fertigation {
+  id: number;
+  doc_id: string;
+  reference: string | null;
+  activity: FertActivity;
+  event_date: string;
+  effective_from: string | null;
+  start_time: string | null;
+  phase: string | null;
+  greenhouse_id: number | null;
+  greenhouse: string | null;
+  type_of_application: string | null;
+  volume_m3: number | null;
+  area_ha: number | null;
+  fertiliser_rate_l_m3: number;
+  acid_rate_l_m3: number;
+  applicator_id: number | null;
+  applicator: string | null;
+  prepared_by: number | null;
+  prepared_by_name: string | null;
+  comments: string | null;
+  status: FertStatus;
+  created_at: string;
+  tanks: FertigationTank[];
+  sources: FertigationSource[];
+  total_cost: number;
+  stock_required_l: number;
+  acid_required_l: number;
+  m3_per_ha: number | null;
+  signature_count: number;
+}
+
+/** What create and edit both send. */
+export interface FertigationBody {
+  activity: FertActivity;
+  event_date: string;
+  effective_from?: string | null;
+  start_time?: string | null;
+  phase?: string | null;
+  greenhouse_id?: number | null;
+  type_of_application?: string | null;
+  volume_m3?: number | null;
+  area_ha?: number | null;
+  fertiliser_rate_l_m3: number;
+  acid_rate_l_m3: number;
+  applicator_id?: number | null;
+  comments?: string | null;
+  status: FertStatus;
+  reference?: string | null;
+  tanks: {
+    code: string;
+    volume_l: number;
+    sets: number;
+    note?: string | null;
+    lines: {
+      fertiliser_id: number | null;
+      fertiliser_code: string;
+      fertiliser_name?: string | null;
+      quantity: number;
+      unit: string;
+      position: number;
+    }[];
+  }[];
+  sources: FertigationSource[];
+}

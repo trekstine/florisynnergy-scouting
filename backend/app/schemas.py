@@ -1110,3 +1110,144 @@ class ApprovalState(BaseModel):
     complete: bool = False
     signed_count: int = 0
     required_count: int = 0
+
+
+# ───────────────────────────── Fertigation ──────────────────────────────────
+ActivityLiteral = Literal["fertigation", "drenching", "flushing"]
+FertStatusLiteral = Literal["draft", "issued", "completed", "cancelled"]
+
+
+class FertiliserIn(BaseModel):
+    code: str = Field(max_length=40)
+    name: str = Field(max_length=150)
+    formula: str | None = Field(default=None, max_length=60)
+    unit: str = Field(default="kg", max_length=10)
+    price_per_unit: float | None = None
+    default_tank: str | None = Field(default=None, max_length=10)
+    is_acid: bool = False
+    pct_n: float | None = None
+    pct_p: float | None = None
+    pct_k: float | None = None
+    pct_ca: float | None = None
+    pct_mg: float | None = None
+    pct_s: float | None = None
+    is_active: bool = True
+
+
+class FertiliserOut(FertiliserIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
+class FertigationLineIn(BaseModel):
+    fertiliser_id: int | None = None
+    fertiliser_code: str = Field(max_length=40)
+    fertiliser_name: str | None = Field(default=None, max_length=150)
+    quantity: float = 0.0
+    unit: str = Field(default="kg", max_length=10)
+    position: int = 0
+
+
+class FertigationLineOut(FertigationLineIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    unit_price: float | None = None
+    cost: float | None = None
+
+
+class FertigationTankIn(BaseModel):
+    code: str = Field(max_length=10)
+    volume_l: float = 1000.0
+    sets: float = 1.0
+    note: str | None = Field(default=None, max_length=200)
+    lines: list[FertigationLineIn] = []
+
+
+class FertigationTankOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    code: str
+    volume_l: float
+    sets: float
+    note: str | None = None
+    lines: list[FertigationLineOut] = []
+    # Quantity × sets, summed — what actually leaves the store for this tank.
+    total_cost: float = 0.0
+
+
+class FertigationSourceIn(BaseModel):
+    source: str = Field(max_length=30)
+    volume_m3: float | None = None
+    ec: float | None = None
+    ph: float | None = None
+    note: str | None = Field(default=None, max_length=200)
+
+
+class FertigationSourceOut(FertigationSourceIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
+class FertigationIn(BaseModel):
+    """Everything the sheet captures. Tanks and sources come with it."""
+
+    activity: ActivityLiteral = "fertigation"
+    event_date: date
+    effective_from: date | None = None
+    start_time: str | None = Field(default=None, max_length=10)
+    phase: str | None = Field(default=None, max_length=60)
+    greenhouse_id: int | None = None
+    type_of_application: str | None = Field(default=None, max_length=60)
+    volume_m3: float | None = None
+    area_ha: float | None = None
+    fertiliser_rate_l_m3: float = 6.0
+    acid_rate_l_m3: float = 2.0
+    applicator_id: int | None = None
+    comments: str | None = None
+    status: FertStatusLiteral = "draft"
+    reference: str | None = Field(default=None, max_length=40)
+    tanks: list[FertigationTankIn] = []
+    sources: list[FertigationSourceIn] = []
+
+
+class FertigationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    doc_id: str
+    reference: str | None = None
+    activity: str
+    event_date: date
+    effective_from: date | None = None
+    start_time: str | None = None
+    phase: str | None = None
+    greenhouse_id: int | None = None
+    greenhouse: str | None = None
+    type_of_application: str | None = None
+    volume_m3: float | None = None
+    area_ha: float | None = None
+    fertiliser_rate_l_m3: float
+    acid_rate_l_m3: float
+    applicator_id: int | None = None
+    applicator: str | None = None
+    prepared_by: int | None = None
+    prepared_by_name: str | None = None
+    comments: str | None = None
+    status: str
+    created_at: datetime
+
+    tanks: list[FertigationTankOut] = []
+    sources: list[FertigationSourceOut] = []
+
+    # ── Derived, so every screen shows the same arithmetic ──
+    total_cost: float = 0.0
+    # Stock solution the injection rate calls for, in litres, and the sets that
+    # implies at the tank volume in use.
+    stock_required_l: float = 0.0
+    acid_required_l: float = 0.0
+    m3_per_ha: float | None = None
+    signature_count: int = 0

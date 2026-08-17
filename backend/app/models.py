@@ -654,3 +654,178 @@ class Signature(Base):
     __table_args__ = (
         Index("idx_signature_doc", "document_type", "document_id"),
     )
+
+
+# ───────────────────────────── Fertigation ──────────────────────────────────
+class Fertiliser(Base):
+    """A salt or acid that can go into a stock tank.
+
+    Separate from `Chemical` on purpose: a fertiliser has a nutrient analysis
+    and no PHI, REI, WHO class or RAC group. Forcing both into one table would
+    leave half the columns null on every row and invite a spray compliance
+    check to run against a bag of magnesium sulphate.
+    """
+
+    __tablename__ = "fertilisers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    # Written as the farm writes it on the sheet — CANO3, MGSO4, H2SO4.
+    formula: Mapped[str | None] = mapped_column(String(60))
+    unit: Mapped[str] = mapped_column(String(10), default="kg")
+    price_per_unit: Mapped[float | None] = mapped_column(Float)
+    # Which tank this normally belongs in. A hint for the builder, not a rule —
+    # the same salt sits in different tanks on different farms.
+    default_tank: Mapped[str | None] = mapped_column(String(10))
+    # Acids are dosed at their own injection rate, so they are flagged rather
+    # than inferred from the name.
+    is_acid: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Nutrient analysis, percent by weight. Optional — a farm can run the
+    # module on quantities alone and fill these in later.
+    pct_n: Mapped[float | None] = mapped_column(Float)
+    pct_p: Mapped[float | None] = mapped_column(Float)
+    pct_k: Mapped[float | None] = mapped_column(Float)
+    pct_ca: Mapped[float | None] = mapped_column(Float)
+    pct_mg: Mapped[float | None] = mapped_column(Float)
+    pct_s: Mapped[float | None] = mapped_column(Float)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Fertigation(Base):
+    """One fertigation, drench or flush — the sheet a farm signs and files."""
+
+    __tablename__ = "fertigations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # The id the printable document and its signatures are keyed by.
+    doc_id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False), unique=True, index=True, nullable=False
+    )
+    reference: Mapped[str | None] = mapped_column(String(40))
+
+    activity: Mapped[str] = mapped_column(String(20), default="fertigation")
+    event_date: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    start_time: Mapped[str | None] = mapped_column(String(10))
+
+    # A farm groups blocks into phases; the block list is what actually got fed.
+    phase: Mapped[str | None] = mapped_column(String(60))
+    greenhouse_id: Mapped[int | None] = mapped_column(
+        ForeignKey("greenhouses.id", ondelete="SET NULL")
+    )
+
+    type_of_application: Mapped[str | None] = mapped_column(String(60))
+    # Irrigation water delivered, in cubic metres — the number every other
+    # figure on the sheet is derived from.
+    volume_m3: Mapped[float | None] = mapped_column(Float)
+    area_ha: Mapped[float | None] = mapped_column(Float)
+
+    # Litres of stock solution injected per m³ of irrigation water. Held on the
+    # record rather than read from config at display time, so a rate change
+    # next season does not rewrite what this sheet said.
+    fertiliser_rate_l_m3: Mapped[float] = mapped_column(Float, default=6.0)
+    acid_rate_l_m3: Mapped[float] = mapped_column(Float, default=2.0)
+
+    applicator_id: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    prepared_by: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL")
+    )
+    comments: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    tanks: Mapped[list["FertigationTank"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="FertigationTank.code"
+    )
+    sources: Mapped[list["FertigationSource"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "activity IN ('fertigation', 'drenching', 'flushing')",
+            name="ck_fertigation_activity",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'issued', 'completed', 'cancelled')",
+            name="ck_fertigation_status",
+        ),
+        Index("idx_fertigation_lookup", "event_date", "greenhouse_id"),
+    )
+
+
+class FertigationTank(Base):
+    """A stock tank — A, B, C — its volume, and how many sets were made up.
+
+    Tanks are rows rather than columns because their number and naming differ
+    by farm, and a two-tank site should not carry an empty Tank C.
+    """
+
+    __tablename__ = "fertigation_tanks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fertigation_id: Mapped[int] = mapped_column(
+        ForeignKey("fertigations.id", ondelete="CASCADE"), index=True
+    )
+    code: Mapped[str] = mapped_column(String(10), nullable=False)
+    volume_l: Mapped[float] = mapped_column(Float, default=1000.0)
+    sets: Mapped[float] = mapped_column(Float, default=1.0)
+    note: Mapped[str | None] = mapped_column(String(200))
+
+    lines: Mapped[list["FertigationLine"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="FertigationLine.position"
+    )
+
+
+class FertigationLine(Base):
+    """One fertiliser in one tank, at the quantity written on the sheet."""
+
+    __tablename__ = "fertigation_lines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tank_id: Mapped[int] = mapped_column(
+        ForeignKey("fertigation_tanks.id", ondelete="CASCADE"), index=True
+    )
+    fertiliser_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fertilisers.id", ondelete="SET NULL")
+    )
+    # Denormalised so a renamed or retired fertiliser cannot change what a
+    # signed sheet says was put in the tank.
+    fertiliser_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    fertiliser_name: Mapped[str | None] = mapped_column(String(150))
+    quantity: Mapped[float] = mapped_column(Float, default=0.0)
+    unit: Mapped[str] = mapped_column(String(10), default="kg")
+    unit_price: Mapped[float | None] = mapped_column(Float)
+    cost: Mapped[float | None] = mapped_column(Float)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class FertigationSource(Base):
+    """Where the water came from, and what it read.
+
+    EC and pH belong to the source, not the event: borehole and river water
+    differ, and averaging them into one figure loses the reason the acid dose
+    changed.
+    """
+
+    __tablename__ = "fertigation_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fertigation_id: Mapped[int] = mapped_column(
+        ForeignKey("fertigations.id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
+    volume_m3: Mapped[float | None] = mapped_column(Float)
+    ec: Mapped[float | None] = mapped_column(Float)
+    ph: Mapped[float | None] = mapped_column(Float)
+    note: Mapped[str | None] = mapped_column(String(200))

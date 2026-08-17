@@ -17,6 +17,9 @@ import type {
   ApprovalState,
   Employee,
   EtlAudit,
+  Fertigation,
+  FertigationBody,
+  Fertiliser,
   EtlRule,
   Filters,
   Greenhouse,
@@ -822,5 +825,73 @@ export function useRetireApprovalSlot() {
   return useMutation({
     mutationFn: (id: number) => api.del<void>(`${V1}/approvals/slots/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["approval-slots"] }),
+  });
+}
+
+// ── Fertigation ─────────────────────────────────────────────────────────────
+const FERT_KEYS = ["fertigations", "fertigation", "approval"];
+
+export const useFertilisers = () =>
+  useQuery({
+    queryKey: ["fertilisers"],
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.get<Fertiliser[]>(`${V1}/fertigation/fertilisers`),
+  });
+
+export const useFertigations = (params?: {
+  activity?: string;
+  greenhouse_id?: number;
+  status?: string;
+  start?: string;
+  end?: string;
+}) => {
+  const qs = new URLSearchParams();
+  if (params?.activity) qs.set("activity", params.activity);
+  if (params?.greenhouse_id) qs.set("greenhouse_id", String(params.greenhouse_id));
+  if (params?.status) qs.set("status", params.status);
+  if (params?.start) qs.set("start", params.start);
+  if (params?.end) qs.set("end", params.end);
+  const s = qs.toString();
+  return useQuery({
+    queryKey: ["fertigations", s],
+    queryFn: () => api.get<Fertigation[]>(`${V1}/fertigation${s ? `?${s}` : ""}`),
+  });
+};
+
+export const useFertigation = (docId: string | null) =>
+  useQuery({
+    queryKey: ["fertigation", docId],
+    enabled: !!docId,
+    queryFn: () => api.get<Fertigation>(`${V1}/fertigation/${docId}`),
+  });
+
+/** Tank chemistry problems — calcium sharing a tank with sulphate, and such. */
+export const useFertigationWarnings = (docId: string | null) =>
+  useQuery({
+    queryKey: ["fertigation-warnings", docId],
+    enabled: !!docId,
+    queryFn: () => api.get<string[]>(`${V1}/fertigation/${docId}/warnings`),
+  });
+
+export function useSaveFertigation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ docId, body }: { docId?: string | null; body: FertigationBody }) =>
+      docId
+        ? api.put<Fertigation>(`${V1}/fertigation/${docId}`, body)
+        : api.post<Fertigation>(`${V1}/fertigation`, body),
+    onSuccess: () => {
+      for (const key of FERT_KEYS) qc.invalidateQueries({ queryKey: [key] });
+    },
+  });
+}
+
+export function useDeleteFertigation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (docId: string) => api.del<void>(`${V1}/fertigation/${docId}`),
+    onSuccess: () => {
+      for (const key of FERT_KEYS) qc.invalidateQueries({ queryKey: [key] });
+    },
   });
 }

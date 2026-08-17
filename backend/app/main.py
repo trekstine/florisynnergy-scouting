@@ -17,6 +17,7 @@ from .routers import (
     auth,
     etl_rules,
     farms,
+    fertigation,
     integrations,
     media,
     recommendations,
@@ -24,7 +25,7 @@ from .routers import (
     scouting,
     spray,
 )
-from .seed import seed_if_empty
+from .seed import seed_fertilisers, seed_if_empty
 
 settings = get_settings()
 
@@ -65,6 +66,11 @@ async def lifespan(_: FastAPI):
             "integration is closed and will answer 503. Set it in .env and "
             "restart to enable it."
         )
+
+    # The fertiliser register is reference data, not demo data — an existing
+    # deployment should gain it on the next boot without a reseed.
+    async with AsyncSessionLocal() as db:
+        await seed_fertilisers(db)
 
     if settings.seed_on_startup:
         async with AsyncSessionLocal() as db:
@@ -110,3 +116,4 @@ app.include_router(etl_rules.router, prefix=API_V1_PREFIX)
 app.include_router(media.router, prefix=API_V1_PREFIX)
 app.include_router(integrations.router, prefix=API_V1_PREFIX)
 app.include_router(approvals.router, prefix=API_V1_PREFIX)
+app.include_router(fertigation.router, prefix=API_V1_PREFIX)
