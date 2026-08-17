@@ -159,7 +159,18 @@ FERTILISERS = [
     ("MNSO4",    "Manganese sulphate",       "MnSO4",    "B", False, 0,    0,    0,    0,    0,    18.0, 380.0),
     ("H2SO4",    "Sulphuric acid",           "H2SO4",    "C", True,  0,    0,    0,    0,    0,    32.7, 110.0),
     ("H3PO4",    "Phosphoric acid",          "H3PO4",    "C", True,  0,    31.6, 0,    0,    0,    0,    240.0),
+    # From the Fertigation Report's Tank A composition. Superlink is dosed in
+    # litres, which is why the register carries a unit per item rather than
+    # assuming kilograms.
+    ("FE",       "Iron chelate (EDDHA)",     "Fe-EDDHA", "B", False, 0,    0,    0,    0,    0,    0,    1450.0),
+    ("VERMICOMPOST", "Vermicompost",         None,       None, False, 1.5, 0.5,  1.0,  0,    0,    0,    35.0),
+    ("SUPERLINK", "Superlink",               None,       "B", False, 0,    0,    0,    0,    0,    0,    900.0),
 ]
+
+# Items dosed by volume rather than weight.
+LITRE_ITEMS = {"SUPERLINK", "H2SO4", "H3PO4"}
+# Organic feeds, whose rate follows the weather rather than the regime.
+ORGANIC_ITEMS = {"VERMICOMPOST"}
 
 
 async def seed_fertilisers(db: AsyncSession) -> int:
@@ -180,10 +191,11 @@ async def seed_fertilisers(db: AsyncSession) -> int:
                 code=code,
                 name=name,
                 formula=formula,
-                unit="kg",
+                unit="L" if code in LITRE_ITEMS else "kg",
                 price_per_unit=price,
                 default_tank=tank,
                 is_acid=acid,
+                is_organic=code in ORGANIC_ITEMS,
                 pct_n=n or None,
                 pct_p=p or None,
                 pct_k=k or None,

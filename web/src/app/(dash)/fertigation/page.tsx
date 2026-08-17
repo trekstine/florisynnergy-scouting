@@ -216,7 +216,12 @@ export default function FertigationPage() {
                           </Badge>
                         </td>
                         <td className="px-3 py-3 text-ink-soft">
-                          {r.greenhouse ?? r.phase ?? "—"}
+                          {r.phase ?? "No phase"}
+                          {r.blocks_label && (
+                            <span className="block text-xs text-ink-faint">
+                              {r.blocks_label}
+                            </span>
+                          )}
                           {r.type_of_application && (
                             <span className="block text-xs text-ink-faint">
                               {r.type_of_application}

@@ -66,7 +66,8 @@ export default function FertigationDocPage() {
                   : "Flushing Record"}
             </h1>
             <p className="mt-0.5 text-sm text-ink-faint">
-              {f.greenhouse ?? f.phase ?? "Whole farm"}
+              {f.phase ?? "Whole farm"}
+              {f.blocks.length > 0 && ` · ${f.blocks.length} greenhouse${f.blocks.length === 1 ? "" : "s"}`}
             </p>
           </div>
           <div className="text-right text-xs text-ink-faint">
@@ -89,9 +90,20 @@ export default function FertigationDocPage() {
             value={f.volume_m3 != null ? `${f.volume_m3} m³` : "—"}
             strong
           />
-          <Kv label="Area" value={f.area_ha != null ? `${f.area_ha} ha` : "—"} />
+          <Kv
+            label="Area fed"
+            value={
+              f.area_ha != null
+                ? `${f.area_ha} ha${f.blocks.length ? ` · ${f.blocks.length} blocks` : ""}`
+                : "—"
+            }
+          />
           <Kv label="m³ per ha" value={f.m3_per_ha != null ? String(f.m3_per_ha) : "—"} />
           <Kv label="Applicator" value={f.applicator ?? "—"} />
+          {f.target_m3_per_ha != null && (
+            <Kv label="Target rate" value={`${f.target_m3_per_ha} m³/ha`} />
+          )}
+          {f.weather && <Kv label="Weather" value={f.weather} />}
         </div>
 
         {/* What the injection rates call for — the sum the farm did by hand. */}
@@ -105,6 +117,16 @@ export default function FertigationDocPage() {
             <Kv label="Acid injection" value={`${f.acid_rate_l_m3} L per m³`} />
             <Kv label="Acid solution" value={`${f.acid_required_l} L`} strong />
           </div>
+          {f.planned_m3 != null && (
+            <p className="mt-2 text-[10px] text-ink-faint">
+              Planned: {f.target_m3_per_ha} m³/ha × {f.area_ha} ha ={" "}
+              {f.planned_m3} m³
+              {f.volume_m3 != null &&
+                Math.abs(f.planned_m3 - f.volume_m3) >= 0.5 &&
+                ` · ${f.volume_m3} m³ actually applied`}
+              .
+            </p>
+          )}
           {f.volume_m3 != null && (
             <p className="mt-2 text-[10px] text-ink-faint">
               {f.volume_m3} m³ × {f.fertiliser_rate_l_m3} L/m³ ={" "}
@@ -114,6 +136,61 @@ export default function FertigationDocPage() {
             </p>
           )}
         </Section>
+
+        {/* Which blocks were fed — the area every per-hectare figure divides by */}
+        {f.blocks.length > 0 && (
+          <Section title={`Greenhouses fed — ${f.blocks.length}`}>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-faint">
+                  <th className="py-1.5 font-semibold">Greenhouse</th>
+                  <th className="py-1.5 font-semibold">Code</th>
+                  <th className="py-1.5 text-right font-semibold">Area (ha)</th>
+                  <th className="py-1.5 text-right font-semibold">Water (m³)</th>
+                  <th className="py-1.5 text-right font-semibold">m³/ha</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {f.blocks.map((b) => (
+                  <tr key={b.id ?? b.name}>
+                    <td className="py-1.5 font-semibold text-ink">{b.name}</td>
+                    <td className="py-1.5 text-ink-faint">{b.code ?? "—"}</td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {b.area_ha ?? "—"}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {b.volume_m3 ?? <span className="text-ink-faint">apportioned</span>}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {b.m3_per_ha ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-ink">
+                  <td colSpan={2} className="py-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                    Total
+                  </td>
+                  <td className="py-1.5 text-right font-bold tabular-nums text-ink">
+                    {f.area_ha ?? "—"}
+                  </td>
+                  <td className="py-1.5 text-right font-bold tabular-nums text-ink">
+                    {f.blocks_total_m3 || f.volume_m3 || "—"}
+                  </td>
+                  <td className="py-1.5 text-right font-bold tabular-nums text-ink">
+                    {f.m3_per_ha ?? "—"}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+            {f.block_note && (
+              <p className="mt-1.5 text-[10px] font-semibold text-amber-800">
+                {f.block_note}
+              </p>
+            )}
+          </Section>
+        )}
 
         {/* Water sources */}
         {f.sources.length > 0 && (

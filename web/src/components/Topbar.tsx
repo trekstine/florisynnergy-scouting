@@ -18,6 +18,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/mapping": "Farm Mapping",
   "/workforce": "Workforce",
   "/reference": "Reference Data",
+  "/phases": "Fertigation Phases",
   "/approvals": "Approval Signatures",
 };
 
@@ -27,6 +28,7 @@ const SETTINGS_CHILDREN = new Set([
   "/workforce",
   "/reference",
   "/approvals",
+  "/phases",
 ]);
 
 export function Topbar({ user }: { user: SessionUser | null }) {

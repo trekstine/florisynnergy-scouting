@@ -16,6 +16,7 @@ import {
   useEmployees,
   useFertilisers,
   useGreenhouses,
+  usePhases,
   useSaveFertigation,
 } from "@/lib/hooks";
 import type {
@@ -73,11 +74,16 @@ export function FertigationBuilder({
   const [activity, setActivity] = useState<FertActivity>("fertigation");
   const [eventDate, setEventDate] = useState(today);
   const [startTime, setStartTime] = useState("07:00");
-  const [phase, setPhase] = useState("");
-  const [greenhouseId, setGreenhouseId] = useState<string>("");
+  const [phaseId, setPhaseId] = useState<string>("");
+  // Which greenhouses this sheet feeds. A phase selects its blocks; individual
+  // ones can then be ticked off — a block down for maintenance is not fed.
+  const [blockIds, setBlockIds] = useState<number[]>([]);
+  const [blockVolumes, setBlockVolumes] = useState<Record<number, string>>({});
   const [applicationType, setApplicationType] = useState(APPLICATION_TYPES[0]!);
   const [volume, setVolume] = useState("");
   const [area, setArea] = useState("");
+  const [target, setTarget] = useState("");
+  const [weather, setWeather] = useState("");
   const [fertRate, setFertRate] = useState("6");
   const [acidRate, setAcidRate] = useState("2");
   const [applicator, setApplicator] = useState<string>("");
@@ -92,11 +98,22 @@ export function FertigationBuilder({
       setActivity(editing.activity);
       setEventDate(editing.event_date.slice(0, 10));
       setStartTime(editing.start_time ?? "07:00");
-      setPhase(editing.phase ?? "");
-      setGreenhouseId(editing.greenhouse_id ? String(editing.greenhouse_id) : "");
+      setPhaseId(editing.phase_id ? String(editing.phase_id) : "");
+      setBlockIds(
+        editing.blocks.map((b) => b.greenhouse_id).filter((x): x is number => x != null),
+      );
+      setBlockVolumes(
+        Object.fromEntries(
+          editing.blocks
+            .filter((b) => b.greenhouse_id != null && b.volume_m3 != null)
+            .map((b) => [b.greenhouse_id as number, String(b.volume_m3)]),
+        ),
+      );
       setApplicationType(editing.type_of_application ?? APPLICATION_TYPES[0]!);
       setVolume(editing.volume_m3 != null ? String(editing.volume_m3) : "");
       setArea(editing.area_ha != null ? String(editing.area_ha) : "");
+      setTarget(editing.target_m3_per_ha != null ? String(editing.target_m3_per_ha) : "");
+      setWeather(editing.weather ?? "");
       setFertRate(String(editing.fertiliser_rate_l_m3));
       setAcidRate(String(editing.acid_rate_l_m3));
       setApplicator(editing.applicator_id ? String(editing.applicator_id) : "");
@@ -107,11 +124,14 @@ export function FertigationBuilder({
       setActivity("fertigation");
       setEventDate(today);
       setStartTime("07:00");
-      setPhase("");
-      setGreenhouseId("");
+      setPhaseId("");
+      setBlockIds([]);
+      setBlockVolumes({});
       setApplicationType(APPLICATION_TYPES[0]!);
       setVolume("");
       setArea("");
+      setTarget("");
+      setWeather("");
       setFertRate("6");
       setAcidRate("2");
       setApplicator("");
@@ -123,8 +143,32 @@ export function FertigationBuilder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing?.doc_id]);
 
+  const phases = usePhases();
+  const allHouses = useMemo(() => greenhouses.data ?? [], [greenhouses.data]);
+  const selectedPhase = (phases.data ?? []).find((p) => p.id === Number(phaseId));
+
+  /** The blocks on offer: a phase narrows the list, otherwise the whole farm. */
+  const offered = useMemo(
+    () =>
+      selectedPhase
+        ? allHouses.filter((g) => selectedPhase.greenhouse_ids.includes(g.id))
+        : allHouses,
+    [allHouses, selectedPhase],
+  );
+
+  /** BR-001 — area is the sum over the blocks fed, never one block's figure. */
+  const selectedArea = useMemo(
+    () =>
+      Math.round(
+        allHouses
+          .filter((g) => blockIds.includes(g.id))
+          .reduce((s, g) => s + Number(g.area_ha ?? 0), 0) * 10000,
+      ) / 10000,
+    [allHouses, blockIds],
+  );
+
   const volumeNum = Number(volume) || 0;
-  const areaNum = Number(area) || 0;
+  const areaNum = Number(area) || selectedArea || 0;
   const fertRateNum = Number(fertRate) || 0;
   const acidRateNum = Number(acidRate) || 0;
 
@@ -157,6 +201,10 @@ export function FertigationBuilder({
         ),
       0,
     );
+    const planned =
+      Number(target) > 0 && selectedArea > 0
+        ? Math.round(Number(target) * selectedArea * 100) / 100
+        : null;
     const sourcesTotal =
       Math.round(sources.reduce((s, x) => s + (x.volume_m3 ?? 0), 0) * 100) / 100;
 
@@ -168,13 +216,14 @@ export function FertigationBuilder({
       isAcidTank,
       impliedSets,
       effectiveSets,
+      planned,
       sourcesTotal,
       sourceGap:
         volumeNum > 0 && sourcesTotal > 0 && Math.abs(sourcesTotal - volumeNum) >= 0.5
           ? Math.round((sourcesTotal - volumeNum) * 100) / 100
           : null,
     };
-  }, [volumeNum, areaNum, fertRateNum, acidRateNum, tanks, sources]);
+  }, [volumeNum, areaNum, fertRateNum, acidRateNum, tanks, sources, target, selectedArea]);
 
   /** Calcium and sulphate in one tank will precipitate — say so while it can
    *  still be fixed, rather than at the drippers. */
@@ -272,11 +321,18 @@ export function FertigationBuilder({
       activity,
       event_date: eventDate,
       start_time: startTime || null,
-      phase: phase || null,
-      greenhouse_id: greenhouseId ? Number(greenhouseId) : null,
+      phase_id: phaseId ? Number(phaseId) : null,
+      // Area is only sent when it was typed over; otherwise the server sums
+      // the blocks, so one rule governs it.
+      blocks: blockIds.map((id) => ({
+        greenhouse_id: id,
+        volume_m3: blockVolumes[id] ? Number(blockVolumes[id]) : null,
+      })),
       type_of_application: applicationType,
       volume_m3: volumeNum || null,
-      area_ha: areaNum || null,
+      area_ha: area ? Number(area) : null,
+      target_m3_per_ha: target ? Number(target) : null,
+      weather: weather || null,
       fertiliser_rate_l_m3: fertRateNum,
       acid_rate_l_m3: acidRateNum,
       applicator_id: applicator ? Number(applicator) : null,
@@ -371,21 +427,22 @@ export function FertigationBuilder({
                 />
               </Field>
               <Field label="Phase">
-                <TextInput
-                  value={phase}
-                  onChange={(e) => setPhase(e.target.value)}
-                  placeholder="e.g. Phase 1"
-                />
-              </Field>
-              <Field label="Greenhouse">
                 <Select
-                  value={greenhouseId}
-                  onChange={(e) => setGreenhouseId(e.target.value)}
+                  value={phaseId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setPhaseId(id);
+                    // Picking a phase selects the blocks on it — that is the
+                    // point of a phase. Individual ones can still be unticked.
+                    const p = (phases.data ?? []).find((x) => x.id === Number(id));
+                    setBlockIds(p ? [...p.greenhouse_ids] : []);
+                  }}
                 >
-                  <option value="">Whole phase</option>
-                  {(greenhouses.data ?? []).map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
+                  <option value="">No phase — pick blocks directly</option>
+                  {(phases.data ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.greenhouse_ids.length} block
+                      {p.greenhouse_ids.length === 1 ? "" : "s"})
                     </option>
                   ))}
                 </Select>
@@ -419,7 +476,24 @@ export function FertigationBuilder({
                   step="0.001"
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
-                  placeholder="e.g. 32"
+                  placeholder={selectedArea ? String(selectedArea) : "e.g. 32"}
+                />
+              </Field>
+              <Field label="Target m³ per ha">
+                <TextInput
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                  placeholder="e.g. 33.33"
+                />
+              </Field>
+              <Field label="Weather">
+                <TextInput
+                  value={weather}
+                  onChange={(e) => setWeather(e.target.value)}
+                  placeholder="e.g. Overcast, cool"
                 />
               </Field>
               <Field label="Applicator">
@@ -463,6 +537,128 @@ export function FertigationBuilder({
               from: the stock and acid solution, every tank&apos;s set count, and
               the cost.
             </p>
+
+            {/* The report plans forwards — "m³ used = 33.33 × area" — so offer
+                that rather than making somebody do it on a calculator. */}
+            {derived.planned != null && (
+              <div
+                className={`mt-2 rounded-lg border px-3 py-2 text-xs ${
+                  volumeNum > 0 && Math.abs(derived.planned - volumeNum) >= 0.5
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : "border-line bg-surface text-ink-faint"
+                }`}
+              >
+                {target} m³/ha × {selectedArea} ha ={" "}
+                <strong className="tabular-nums">{derived.planned} m³</strong> planned
+                {volumeNum > 0 && Math.abs(derived.planned - volumeNum) >= 0.5 && (
+                  <> — {volumeNum} m³ recorded.</>
+                )}{" "}
+                <button
+                  type="button"
+                  onClick={() => setVolume(String(derived.planned))}
+                  className="font-semibold underline"
+                >
+                  Use the planned figure
+                </button>
+              </div>
+            )}
+          </section>
+
+          {/* ── Which blocks this feeds ── */}
+          <section>
+            <div className="mb-2 flex flex-wrap items-center gap-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink-faint">
+                Greenhouses fed
+              </h3>
+              <span className="text-xs text-ink-faint">
+                {blockIds.length} selected ·{" "}
+                <strong className="text-ink-soft">{selectedArea} ha</strong>
+                {area && Number(area) !== selectedArea && (
+                  <span className="text-amber-700">
+                    {" "}
+                    — area overridden to {area} ha
+                  </span>
+                )}
+              </span>
+              {offered.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setBlockIds(
+                      blockIds.length === offered.length
+                        ? []
+                        : offered.map((g) => g.id),
+                    )
+                  }
+                  className="ml-auto text-xs font-semibold text-brand-700 hover:underline"
+                >
+                  {blockIds.length === offered.length ? "Select none" : "Select all"}
+                </button>
+              )}
+            </div>
+
+            <p className="mb-2 text-xs text-ink-faint">
+              Area is the sum over these blocks — it is what m³ per hectare
+              divides by. Enter a per-block volume only where the farm meters
+              each greenhouse; otherwise the phase total is apportioned by area.
+            </p>
+
+            <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              {offered.map((g) => {
+                const on = blockIds.includes(g.id);
+                return (
+                  <div
+                    key={g.id}
+                    className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
+                      on ? "border-brand-300 bg-brand-50/40" : "border-line"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() =>
+                        setBlockIds((prev) =>
+                          prev.includes(g.id)
+                            ? prev.filter((x) => x !== g.id)
+                            : [...prev, g.id],
+                        )
+                      }
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-ink">
+                        {g.name}
+                      </span>
+                      <span className="text-[11px] text-ink-faint">
+                        {g.area_ha != null ? `${g.area_ha} ha` : "area not set"}
+                      </span>
+                    </span>
+                    {on && (
+                      <TextInput
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        placeholder="m³"
+                        value={blockVolumes[g.id] ?? ""}
+                        onChange={(e) =>
+                          setBlockVolumes((prev) => ({
+                            ...prev,
+                            [g.id]: e.target.value,
+                          }))
+                        }
+                        className="!w-20 !py-1 text-xs"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {offered.length === 0 && (
+              <p className="rounded-lg border border-dashed border-line px-3 py-3 text-xs text-ink-faint">
+                No greenhouses on this phase yet. Map them under Settings →
+                Fertigation phases.
+              </p>
+            )}
 
             {/* Everything the water volume implies, before anything is saved. */}
             <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-4">

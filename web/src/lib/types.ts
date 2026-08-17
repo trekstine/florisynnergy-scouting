@@ -29,6 +29,9 @@ export interface Greenhouse {
   qr_code_hash: string;
   boundary: Coordinate[];
   bed_count: number;
+  /** Hectares — what fertigation sums to get the area fed. */
+  area_ha: number | null;
+  phase_id: number | null;
   created_at?: string | null;
 }
 
@@ -604,6 +607,7 @@ export interface Fertiliser {
   price_per_unit: number | null;
   default_tank: string | null;
   is_acid: boolean;
+  is_organic: boolean;
   pct_n: number | null;
   pct_p: number | null;
   pct_k: number | null;
@@ -651,6 +655,30 @@ export interface FertigationSource {
   note: string | null;
 }
 
+export interface Phase {
+  id: number;
+  farm_id: number | null;
+  code: string;
+  name: string;
+  note: string | null;
+  position: number;
+  is_active: boolean;
+  greenhouse_ids: number[];
+  greenhouses: string[];
+  area_ha: number;
+}
+
+export interface FertigationBlock {
+  id?: number;
+  greenhouse_id: number | null;
+  name: string;
+  code: string | null;
+  area_ha: number | null;
+  volume_m3: number | null;
+  position: number;
+  m3_per_ha?: number | null;
+}
+
 export interface Fertigation {
   id: number;
   doc_id: string;
@@ -659,12 +687,15 @@ export interface Fertigation {
   event_date: string;
   effective_from: string | null;
   start_time: string | null;
+  phase_id: number | null;
   phase: string | null;
-  greenhouse_id: number | null;
-  greenhouse: string | null;
+  blocks: FertigationBlock[];
+  blocks_label: string | null;
   type_of_application: string | null;
   volume_m3: number | null;
   area_ha: number | null;
+  target_m3_per_ha: number | null;
+  weather: string | null;
   fertiliser_rate_l_m3: number;
   acid_rate_l_m3: number;
   applicator_id: number | null;
@@ -683,6 +714,11 @@ export interface Fertigation {
   sources_total_m3: number;
   /** Set when the recorded sources do not add up to the water applied. */
   source_note: string | null;
+  blocks_total_m3: number;
+  /** Set when the per-greenhouse volumes do not add up to the water applied. */
+  block_note: string | null;
+  /** Target rate × area fed — the report's "m³ used = 33.33 × area". */
+  planned_m3: number | null;
   signature_count: number;
 }
 
@@ -692,11 +728,14 @@ export interface FertigationBody {
   event_date: string;
   effective_from?: string | null;
   start_time?: string | null;
+  phase_id?: number | null;
   phase?: string | null;
-  greenhouse_id?: number | null;
+  blocks: { greenhouse_id: number; area_ha?: number | null; volume_m3?: number | null }[];
   type_of_application?: string | null;
   volume_m3?: number | null;
   area_ha?: number | null;
+  target_m3_per_ha?: number | null;
+  weather?: string | null;
   fertiliser_rate_l_m3: number;
   acid_rate_l_m3: number;
   applicator_id?: number | null;

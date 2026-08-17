@@ -59,6 +59,8 @@ async def _gh_out(db: AsyncSession, gh: Greenhouse) -> GreenhouseOut:
         qr_code_hash=gh.qr_code_hash,
         boundary=geometry_to_coords(gh.boundary),
         bed_count=int(bed_count),
+        area_ha=float(gh.area_ha) if gh.area_ha is not None else None,
+        phase_id=gh.phase_id,
         created_at=gh.created_at,
     )
 

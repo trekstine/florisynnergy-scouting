@@ -24,14 +24,17 @@ from ..deps import get_current_employee, require_roles
 from ..models import (
     Employee,
     Fertigation,
+    FertigationBlock,
     FertigationLine,
     FertigationSource,
     FertigationTank,
     Fertiliser,
     Greenhouse,
+    Phase,
     Signature,
 )
 from ..schemas import (
+    FertigationBlockOut,
     FertigationIn,
     FertigationLineOut,
     FertigationOut,
@@ -39,6 +42,8 @@ from ..schemas import (
     FertigationTankOut,
     FertiliserIn,
     FertiliserOut,
+    PhaseIn,
+    PhaseOut,
 )
 from ..services import fertigation as calc
 
@@ -96,6 +101,119 @@ async def update_fertiliser(
     return row
 
 
+# ───────────────────────────────── Phases ────────────────────────────────────
+async def _phase_out(db: AsyncSession, phase: Phase) -> PhaseOut:
+    houses = list(
+        (
+            await db.execute(
+                select(Greenhouse)
+                .where(Greenhouse.phase_id == phase.id)
+                .order_by(Greenhouse.name)
+            )
+        ).scalars().all()
+    )
+    return PhaseOut(
+        id=phase.id,
+        farm_id=phase.farm_id,
+        code=phase.code,
+        name=phase.name,
+        note=phase.note,
+        position=phase.position,
+        is_active=phase.is_active,
+        greenhouse_ids=[g.id for g in houses],
+        greenhouses=[g.name for g in houses],
+        area_ha=round(sum(float(g.area_ha or 0) for g in houses), 4),
+    )
+
+
+@router.get("/phases", response_model=list[PhaseOut])
+async def list_phases(
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(get_current_employee),
+):
+    rows = (
+        await db.execute(select(Phase).order_by(Phase.position, Phase.code))
+    ).scalars().all()
+    return [await _phase_out(db, p) for p in rows]
+
+
+async def _map_greenhouses(db: AsyncSession, phase: Phase, ids: list[int]) -> None:
+    """Set the phase's block membership to exactly this list."""
+    current = (
+        await db.execute(select(Greenhouse).where(Greenhouse.phase_id == phase.id))
+    ).scalars().all()
+    for g in current:
+        if g.id not in ids:
+            g.phase_id = None
+    if ids:
+        for g in (
+            await db.execute(select(Greenhouse).where(Greenhouse.id.in_(ids)))
+        ).scalars():
+            g.phase_id = phase.id
+
+
+@router.post("/phases", response_model=PhaseOut, status_code=status.HTTP_201_CREATED)
+async def create_phase(
+    payload: PhaseIn,
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(require_roles("admin", "supervisor")),
+):
+    phase = Phase(
+        farm_id=payload.farm_id,
+        code=payload.code.strip(),
+        name=payload.name.strip(),
+        note=payload.note,
+        position=payload.position,
+        is_active=payload.is_active,
+    )
+    db.add(phase)
+    try:
+        await db.flush()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "That phase code is in use.")
+    await _map_greenhouses(db, phase, payload.greenhouse_ids)
+    await db.commit()
+    await db.refresh(phase)
+    return await _phase_out(db, phase)
+
+
+@router.put("/phases/{phase_id}", response_model=PhaseOut)
+async def update_phase(
+    phase_id: int,
+    payload: PhaseIn,
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(require_roles("admin", "supervisor")),
+):
+    phase = await db.get(Phase, phase_id)
+    if phase is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Phase not found")
+    phase.code = payload.code.strip()
+    phase.name = payload.name.strip()
+    phase.note = payload.note
+    phase.position = payload.position
+    phase.is_active = payload.is_active
+    await _map_greenhouses(db, phase, payload.greenhouse_ids)
+    await db.commit()
+    await db.refresh(phase)
+    return await _phase_out(db, phase)
+
+
+@router.delete("/phases/{phase_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_phase(
+    phase_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(require_roles("admin")),
+):
+    phase = await db.get(Phase, phase_id)
+    if phase is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Phase not found")
+    # Blocks are released rather than deleted with the phase.
+    await _map_greenhouses(db, phase, [])
+    await db.delete(phase)
+    await db.commit()
+
+
 # ─────────────────────────────── Fertigations ────────────────────────────────
 async def _signature_count(db: AsyncSession, doc_id: str) -> int:
     return (
@@ -113,7 +231,6 @@ async def _signature_count(db: AsyncSession, doc_id: str) -> int:
 
 async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
     """Assemble the record with everything derived from it."""
-    gh = await db.get(Greenhouse, row.greenhouse_id) if row.greenhouse_id else None
     applicator = (
         await db.get(Employee, row.applicator_id) if row.applicator_id else None
     )
@@ -123,6 +240,30 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
     # disagree about how many sets a tank is making up.
     stock_l = calc.stock_required_l(row.volume_m3, row.fertiliser_rate_l_m3)
     acid_l = calc.stock_required_l(row.volume_m3, row.acid_rate_l_m3)
+
+    # BR-001: the area is the sum over the blocks fed, not one block's figure.
+    # A stored area_ha still wins where somebody set it deliberately.
+    ordered_blocks = sorted(row.blocks, key=lambda b: (b.position, b.name))
+    summed_area = calc.selected_area_ha(ordered_blocks)
+    area_ha = row.area_ha if row.area_ha is not None else (summed_area or None)
+
+    blocks = [
+        FertigationBlockOut(
+            id=b.id,
+            greenhouse_id=b.greenhouse_id,
+            name=b.name,
+            code=b.code,
+            area_ha=b.area_ha,
+            volume_m3=b.volume_m3,
+            position=b.position,
+            m3_per_ha=calc.block_m3_per_ha(b, row.volume_m3, summed_area),
+        )
+        for b in ordered_blocks
+    ]
+    blocks_label = (
+        ", ".join(b.name for b in ordered_blocks[:3])
+        + (f" +{len(ordered_blocks) - 3} more" if len(ordered_blocks) > 3 else "")
+    ) or None
 
     tanks = []
     for t in sorted(row.tanks, key=lambda t: t.code):
@@ -151,12 +292,15 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
         event_date=row.event_date,
         effective_from=row.effective_from,
         start_time=row.start_time,
+        phase_id=row.phase_id,
         phase=row.phase,
-        greenhouse_id=row.greenhouse_id,
-        greenhouse=gh.name if gh else None,
+        blocks=blocks,
+        blocks_label=blocks_label,
         type_of_application=row.type_of_application,
         volume_m3=row.volume_m3,
-        area_ha=row.area_ha,
+        area_ha=area_ha,
+        target_m3_per_ha=row.target_m3_per_ha,
+        weather=row.weather,
         fertiliser_rate_l_m3=row.fertiliser_rate_l_m3,
         acid_rate_l_m3=row.acid_rate_l_m3,
         applicator_id=row.applicator_id,
@@ -171,9 +315,12 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
         total_cost=calc.total_cost(row.tanks, stock_l, acid_l),
         stock_required_l=stock_l,
         acid_required_l=acid_l,
-        m3_per_ha=calc.m3_per_ha(row.volume_m3, row.area_ha),
+        m3_per_ha=calc.m3_per_ha(row.volume_m3, area_ha),
         sources_total_m3=calc.sources_total_m3(row.sources),
         source_note=calc.source_mismatch(row.volume_m3, row.sources),
+        blocks_total_m3=calc.blocks_total_m3(ordered_blocks),
+        block_note=calc.block_mismatch(row.volume_m3, ordered_blocks),
+        planned_m3=calc.planned_m3(row.target_m3_per_ha, summed_area),
         signature_count=await _signature_count(db, row.doc_id),
     )
 
@@ -185,16 +332,52 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
     month must not silently restate what this sheet cost.
     """
     for field in (
-        "activity", "event_date", "effective_from", "start_time", "phase",
-        "greenhouse_id", "type_of_application", "volume_m3", "area_ha",
-        "fertiliser_rate_l_m3", "acid_rate_l_m3", "applicator_id", "comments",
+        "activity", "event_date", "effective_from", "start_time", "phase_id",
+        "type_of_application", "volume_m3", "area_ha",
+        "target_m3_per_ha", "weather", "fertiliser_rate_l_m3", "acid_rate_l_m3", "applicator_id", "comments",
         "status", "reference",
     ):
         setattr(row, field, getattr(payload, field))
 
-    if row.area_ha is None and row.greenhouse_id:
-        gh = await db.get(Greenhouse, row.greenhouse_id)
-        row.area_ha = getattr(gh, "area_ha", None) if gh else None
+    # The phase name is snapshotted, so renaming a phase next season cannot
+    # restate what a signed sheet covered.
+    phase = await db.get(Phase, payload.phase_id) if payload.phase_id else None
+    row.phase = phase.name if phase else payload.phase
+
+    # Blocks, with each greenhouse's area captured as it stands today.
+    houses = {
+        g.id: g
+        for g in (
+            await db.execute(
+                select(Greenhouse).where(
+                    Greenhouse.id.in_([b.greenhouse_id for b in payload.blocks] or [-1])
+                )
+            )
+        ).scalars()
+    }
+    row.blocks.clear()
+    for i, block_in in enumerate(payload.blocks):
+        gh = houses.get(block_in.greenhouse_id)
+        if gh is None:
+            continue
+        row.blocks.append(
+            FertigationBlock(
+                greenhouse_id=gh.id,
+                name=gh.name,
+                code=gh.code,
+                area_ha=(
+                    block_in.area_ha
+                    if block_in.area_ha is not None
+                    else (float(gh.area_ha) if gh.area_ha is not None else None)
+                ),
+                volume_m3=block_in.volume_m3,
+                position=i,
+            )
+        )
+
+    # Area follows the selection unless it was set by hand.
+    if payload.area_ha is None:
+        row.area_ha = calc.selected_area_ha(row.blocks) or None
 
     register = {
         f.id: f for f in (await db.execute(select(Fertiliser))).scalars()
@@ -245,6 +428,7 @@ async def list_fertigations(
     db: AsyncSession = Depends(get_db),
     _: Employee = Depends(get_current_employee),
     activity: str | None = Query(default=None),
+    phase_id: int | None = Query(default=None),
     greenhouse_id: int | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     start: date | None = Query(default=None),
@@ -256,8 +440,18 @@ async def list_fertigations(
     ).limit(limit)
     if activity:
         q = q.where(Fertigation.activity == activity)
+    if phase_id is not None:
+        q = q.where(Fertigation.phase_id == phase_id)
     if greenhouse_id is not None:
-        q = q.where(Fertigation.greenhouse_id == greenhouse_id)
+        # "Which sheets fed this block" — answered through the block list, so
+        # a phase-wide event still turns up for each greenhouse on it.
+        q = q.where(
+            Fertigation.id.in_(
+                select(FertigationBlock.fertigation_id).where(
+                    FertigationBlock.greenhouse_id == greenhouse_id
+                )
+            )
+        )
     if status_filter:
         q = q.where(Fertigation.status == status_filter)
     if start is not None:

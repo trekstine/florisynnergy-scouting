@@ -79,6 +79,30 @@ class Farm(Base):
     )
 
 
+class Phase(Base):
+    """An irrigation phase — a group of greenhouses fed together.
+
+    Master data rather than a typed label: the supplied records show Phase 1 as
+    GH1, GH2, GH3, GH11 and Phase 2 as GH4 through GH10, and a fertigation is
+    raised against the phase. Free text could not answer "which blocks did this
+    feed", which is the question every downstream figure depends on.
+    """
+
+    __tablename__ = "phases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    farm_id: Mapped[int | None] = mapped_column(
+        ForeignKey("farms.id", ondelete="CASCADE")
+    )
+    code: Mapped[str] = mapped_column(String(30), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(200))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    __table_args__ = (UniqueConstraint("farm_id", "code", name="uq_phase_farm_code"),)
+
+
 class Greenhouse(Base):
     __tablename__ = "greenhouses"
 
@@ -95,6 +119,12 @@ class Greenhouse(Base):
     )
     # Area in hectares (computed from the polygon via PostGIS on write).
     area_ha: Mapped[float | None] = mapped_column(Numeric(10, 4))
+    # Which irrigation phase this block is fed from. A phase is a real piece of
+    # plumbing — one pump, one set of stock tanks — so a fertigation covers a
+    # phase, and the blocks on it are what actually got fed.
+    phase_id: Mapped[int | None] = mapped_column(
+        ForeignKey("phases.id", ondelete="SET NULL")
+    )
     # Target market for the block — drives market-specific ETL rules.
     market: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(
@@ -681,6 +711,10 @@ class Fertiliser(Base):
     # Acids are dosed at their own injection rate, so they are flagged rather
     # than inferred from the name.
     is_acid: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Vermicompost and other organic feeds. The report is explicit that their
+    # rate varies with prevailing weather rather than following the regime, so
+    # they must not be treated as a fixed recipe line.
+    is_organic: Mapped[bool] = mapped_column(Boolean, default=False)
     # Nutrient analysis, percent by weight. Optional — a farm can run the
     # module on quantities alone and fill these in later.
     pct_n: Mapped[float | None] = mapped_column(Float)
@@ -712,17 +746,27 @@ class Fertigation(Base):
     effective_from: Mapped[date | None] = mapped_column(Date)
     start_time: Mapped[str | None] = mapped_column(String(10))
 
-    # A farm groups blocks into phases; the block list is what actually got fed.
-    phase: Mapped[str | None] = mapped_column(String(60))
-    greenhouse_id: Mapped[int | None] = mapped_column(
-        ForeignKey("greenhouses.id", ondelete="SET NULL")
+    phase_id: Mapped[int | None] = mapped_column(
+        ForeignKey("phases.id", ondelete="SET NULL")
     )
+    # The phase name as it stood, so a renamed phase cannot restate a signed
+    # sheet. Also carries a free-text label where no phase is on file.
+    phase: Mapped[str | None] = mapped_column(String(60))
 
     type_of_application: Mapped[str | None] = mapped_column(String(60))
     # Irrigation water delivered, in cubic metres — the number every other
     # figure on the sheet is derived from.
     volume_m3: Mapped[float | None] = mapped_column(Float)
     area_ha: Mapped[float | None] = mapped_column(Float)
+
+    # The rate the farm plans to. The report works forwards from it:
+    #   m³ used = target m³/ha × greenhouse area
+    # so the water can be planned from the blocks rather than only recorded
+    # after the fact. Null means the volume was measured, not planned.
+    target_m3_per_ha: Mapped[float | None] = mapped_column(Float)
+    # Vermicompost rate varies with the weather, per the source report, so the
+    # conditions are part of the record rather than a note.
+    weather: Mapped[str | None] = mapped_column(String(80))
 
     # Litres of stock solution injected per m³ of irrigation water. Held on the
     # record rather than read from config at display time, so a rate change
@@ -744,6 +788,9 @@ class Fertigation(Base):
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    blocks: Mapped[list["FertigationBlock"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
     tanks: Mapped[list["FertigationTank"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="FertigationTank.code"
     )
@@ -760,7 +807,39 @@ class Fertigation(Base):
             "status IN ('draft', 'issued', 'completed', 'cancelled')",
             name="ck_fertigation_status",
         ),
-        Index("idx_fertigation_lookup", "event_date", "greenhouse_id"),
+        Index("idx_fertigation_lookup", "event_date", "phase_id"),
+    )
+
+
+class FertigationBlock(Base):
+    """One greenhouse on a fertigation, with the area it counted for.
+
+    The area is snapshotted rather than read live: the supplied records already
+    disagree about total farm area — 30 ha in the report, 32 ha in the daily
+    summary — and a sheet has to keep reporting the m³/ha it was signed with.
+    """
+
+    __tablename__ = "fertigation_blocks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fertigation_id: Mapped[int] = mapped_column(
+        ForeignKey("fertigations.id", ondelete="CASCADE"), index=True
+    )
+    greenhouse_id: Mapped[int | None] = mapped_column(
+        ForeignKey("greenhouses.id", ondelete="SET NULL")
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    code: Mapped[str | None] = mapped_column(String(50))
+    area_ha: Mapped[float | None] = mapped_column(Float)
+    # Delivered to this block, where the farm meters per greenhouse. Optional —
+    # many record only the phase total.
+    volume_m3: Mapped[float | None] = mapped_column(Float)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "fertigation_id", "greenhouse_id", name="uq_fertigation_block"
+        ),
     )
 
 

@@ -139,6 +139,67 @@ def source_mismatch(volume_m3: float | None, sources: Iterable) -> str | None:
     )
 
 
+def selected_area_ha(blocks: Iterable) -> float:
+    """BR-001 — the area a fertigation actually covered.
+
+    The sum over the blocks selected, not a single block's hectares. A phase
+    fed as one event covers every greenhouse on it, and dividing the water by
+    one block's area would overstate m³/ha several times over.
+    """
+    total = sum(float(getattr(b, "area_ha", 0) or 0) for b in blocks)
+    return round(total, 4)
+
+
+def planned_m3(target_m3_per_ha: float | None, area_ha: float) -> float | None:
+    """BR-002/003 — plan the water from the area rather than measure it after.
+
+    Straight from the source report: "m³ used = 33.33 × (Greenhouse Area in
+    ha)", summed over the blocks fed.
+    """
+    if not target_m3_per_ha or area_ha <= 0:
+        return None
+    return round(target_m3_per_ha * area_ha, 2)
+
+
+def blocks_total_m3(blocks: Iterable) -> float:
+    """Water metered to individual blocks, where the farm records it."""
+    return round(sum(float(getattr(b, "volume_m3", 0) or 0) for b in blocks), 2)
+
+
+def block_mismatch(volume_m3: float | None, blocks: Iterable) -> str | None:
+    """Do the per-block figures add up to the water that went on?"""
+    listed = [b for b in blocks if getattr(b, "volume_m3", None)]
+    if not volume_m3 or not listed:
+        return None
+    total = blocks_total_m3(listed)
+    diff = round(total - volume_m3, 2)
+    if abs(diff) < 0.5:
+        return None
+    return (
+        f"Per-greenhouse volumes total {total} m³ against {volume_m3} m³ "
+        f"applied ({'+' if diff > 0 else ''}{diff} m³)."
+    )
+
+
+def block_m3_per_ha(block, fallback_total_m3: float | None, total_area: float) -> float | None:
+    """m³/ha for one block.
+
+    Uses its own metered volume where there is one. Otherwise the phase total
+    is apportioned by area, which is the assumption the farm makes when it
+    quotes a single m³/ha for a whole phase.
+    """
+    area = float(getattr(block, "area_ha", 0) or 0)
+    if area <= 0:
+        return None
+    own = getattr(block, "volume_m3", None)
+    if own:
+        return round(float(own) / area, 2)
+    if fallback_total_m3 and total_area > 0:
+        share = float(fallback_total_m3) * (area / total_area)
+        return round(share / area, 2)
+    return None
+
+
 def m3_per_ha(volume_m3: float | None, area_ha: float | None) -> float | None:
     """The figure the farm actually compares between days."""
     if not volume_m3 or not area_ha:

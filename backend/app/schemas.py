@@ -87,6 +87,10 @@ class GreenhouseOut(BaseModel):
     qr_code_hash: str
     boundary: list[Coordinate]
     bed_count: int = 0
+    # Hectares, from the polygon. Fertigation divides water by the summed area
+    # of the blocks fed, so this has to travel with the greenhouse.
+    area_ha: float | None = None
+    phase_id: int | None = None
     created_at: datetime | None = None
 
 
@@ -1125,6 +1129,7 @@ class FertiliserIn(BaseModel):
     price_per_unit: float | None = None
     default_tank: str | None = Field(default=None, max_length=10)
     is_acid: bool = False
+    is_organic: bool = False
     pct_n: float | None = None
     pct_p: float | None = None
     pct_k: float | None = None
@@ -1203,6 +1208,55 @@ class FertigationSourceOut(FertigationSourceIn):
     id: int
 
 
+class PhaseIn(BaseModel):
+    """An irrigation phase and the blocks fed from it."""
+
+    code: str = Field(max_length=30)
+    name: str = Field(max_length=100)
+    note: str | None = Field(default=None, max_length=200)
+    position: int = 0
+    is_active: bool = True
+    farm_id: int | None = None
+    # The greenhouses on this phase. Sent whole — the mapping is edited as a
+    # set, not one block at a time.
+    greenhouse_ids: list[int] = []
+
+
+class PhaseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    farm_id: int | None
+    code: str
+    name: str
+    note: str | None
+    position: int
+    is_active: bool
+    greenhouse_ids: list[int] = []
+    greenhouses: list[str] = []
+    area_ha: float = 0.0
+
+
+class FertigationBlockIn(BaseModel):
+    greenhouse_id: int
+    # Optional override; otherwise the greenhouse's registered area is used.
+    area_ha: float | None = None
+    volume_m3: float | None = None
+
+
+class FertigationBlockOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    greenhouse_id: int | None
+    name: str
+    code: str | None
+    area_ha: float | None
+    volume_m3: float | None
+    position: int
+    m3_per_ha: float | None = None
+
+
 class FertigationIn(BaseModel):
     """Everything the sheet captures. Tanks and sources come with it."""
 
@@ -1210,11 +1264,16 @@ class FertigationIn(BaseModel):
     event_date: date
     effective_from: date | None = None
     start_time: str | None = Field(default=None, max_length=10)
+    phase_id: int | None = None
     phase: str | None = Field(default=None, max_length=60)
-    greenhouse_id: int | None = None
+    # The greenhouses fed. Area is summed over these — BR-001.
+    blocks: list[FertigationBlockIn] = []
     type_of_application: str | None = Field(default=None, max_length=60)
     volume_m3: float | None = None
     area_ha: float | None = None
+    # Plan the water instead of measuring it: m³ = target × summed block area.
+    target_m3_per_ha: float | None = None
+    weather: str | None = Field(default=None, max_length=80)
     fertiliser_rate_l_m3: float = 6.0
     acid_rate_l_m3: float = 2.0
     applicator_id: int | None = None
@@ -1235,12 +1294,16 @@ class FertigationOut(BaseModel):
     event_date: date
     effective_from: date | None = None
     start_time: str | None = None
+    phase_id: int | None = None
     phase: str | None = None
-    greenhouse_id: int | None = None
-    greenhouse: str | None = None
+    blocks: list[FertigationBlockOut] = []
+    # A one-line summary of the blocks, for lists and headings.
+    blocks_label: str | None = None
     type_of_application: str | None = None
     volume_m3: float | None = None
     area_ha: float | None = None
+    target_m3_per_ha: float | None = None
+    weather: str | None = None
     fertiliser_rate_l_m3: float
     acid_rate_l_m3: float
     applicator_id: int | None = None
@@ -1265,4 +1328,9 @@ class FertigationOut(BaseModel):
     # the water applied.
     sources_total_m3: float = 0.0
     source_note: str | None = None
+    blocks_total_m3: float = 0.0
+    block_note: str | None = None
+    # What the target rate calls for over the blocks selected — the report's
+    # "m³ used = 33.33 × greenhouse area", summed.
+    planned_m3: float | None = None
     signature_count: int = 0

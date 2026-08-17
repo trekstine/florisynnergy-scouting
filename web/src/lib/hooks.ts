@@ -20,6 +20,7 @@ import type {
   Fertigation,
   FertigationBody,
   Fertiliser,
+  Phase,
   EtlRule,
   Filters,
   Greenhouse,
@@ -838,8 +839,41 @@ export const useFertilisers = () =>
     queryFn: () => api.get<Fertiliser[]>(`${V1}/fertigation/fertilisers`),
   });
 
+export const usePhases = () =>
+  useQuery({
+    queryKey: ["phases"],
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.get<Phase[]>(`${V1}/fertigation/phases`),
+  });
+
+export function useSavePhase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: Partial<Phase> & { id?: number }) =>
+      id
+        ? api.put<Phase>(`${V1}/fertigation/phases/${id}`, body)
+        : api.post<Phase>(`${V1}/fertigation/phases`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["phases"] });
+      qc.invalidateQueries({ queryKey: ["greenhouses"] });
+    },
+  });
+}
+
+export function useDeletePhase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.del<void>(`${V1}/fertigation/phases/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["phases"] });
+      qc.invalidateQueries({ queryKey: ["greenhouses"] });
+    },
+  });
+}
+
 export const useFertigations = (params?: {
   activity?: string;
+  phase_id?: number;
   greenhouse_id?: number;
   status?: string;
   start?: string;
@@ -847,6 +881,7 @@ export const useFertigations = (params?: {
 }) => {
   const qs = new URLSearchParams();
   if (params?.activity) qs.set("activity", params.activity);
+  if (params?.phase_id) qs.set("phase_id", String(params.phase_id));
   if (params?.greenhouse_id) qs.set("greenhouse_id", String(params.greenhouse_id));
   if (params?.status) qs.set("status", params.status);
   if (params?.start) qs.set("start", params.start);

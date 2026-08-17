@@ -53,6 +53,7 @@ export const SETTINGS_CHILDREN = [
   { href: "/mapping", label: "Farm Mapping" },
   { href: "/workforce", label: "Workforce" },
   { href: "/reference", label: "Reference Data" },
+  { href: "/phases", label: "Fertigation Phases" },
   { href: "/approvals", label: "Approval Signatures" },
 ];
 

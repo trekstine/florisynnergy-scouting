@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Bug, ClipboardCheck, Map, Users } from "lucide-react";
+import { ArrowRight, Bug, ClipboardCheck, Layers, Map, Users } from "lucide-react";
 import Link from "next/link";
 
 import { LogoMark } from "@/components/Logo";
@@ -12,11 +12,12 @@ import {
   useEtlRules,
   useGreenhouses,
   usePests,
+  usePhases,
   useVarieties,
 } from "@/lib/hooks";
 
 /**
- * Settings — a hub over the four pages where configuration actually happens.
+ * Settings — a hub over the pages where configuration actually happens.
  *
  * The previous version listed twelve rows leading to four destinations: five
  * of them all landed on Reference data. That promised a structure the app does
@@ -33,6 +34,7 @@ export default function SettingsPage() {
   const chemicals = useChemicals();
   const etlRules = useEtlRules();
   const slots = useApprovalSlots();
+  const phases = usePhases();
 
   const beds = (greenhouses.data ?? []).reduce((s, g) => s + (g.bed_count ?? 0), 0);
   const scouts = (employees.data ?? []).filter((e) => e.role === "scout").length;
@@ -68,6 +70,18 @@ export default function SettingsPage() {
       ],
     },
     {
+      href: "/phases",
+      icon: Layers,
+      title: "Fertigation phases",
+      blurb:
+        "Which greenhouses are fed together. A fertigation covers a phase, and the area it reports is the sum of the blocks on it — so this mapping decides whether every m³ per hectare is right.",
+      items: [
+        n(phases.data?.length, "phase"),
+        `${(phases.data ?? []).reduce((s, p) => s + p.greenhouse_ids.length, 0)} blocks mapped`,
+        "Water and area per block",
+      ],
+    },
+    {
       href: "/reference",
       icon: Bug,
       title: "Agronomy reference",
@@ -100,7 +114,7 @@ export default function SettingsPage() {
       <header className="border-b border-line pb-4">
         <h1 className="text-xl font-bold tracking-tight text-ink">Settings</h1>
         <p className="mt-1 text-sm text-ink-faint">
-          Four places to configure this farm. Everything else in the portal reads
+          Where this farm is configured. Everything else in the portal reads
           from what is set here.
         </p>
       </header>
