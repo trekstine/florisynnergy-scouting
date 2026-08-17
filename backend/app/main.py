@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from . import API_V1_PREFIX
 from .config import get_settings
 from .database import AsyncSessionLocal, Base, engine
+from .migrate import sync_columns
 from .routers import (
     analytics,
     approvals,
@@ -30,10 +31,12 @@ from .seed import seed_fertilisers, seed_if_empty
 settings = get_settings()
 
 
-# Additive column migrations. `create_all` only creates missing *tables* —
-# it never alters an existing one, so a column added to a model after the
-# first deploy would be missing in production. Each statement is idempotent
-# (IF NOT EXISTS), so this is safe to run on every boot.
+# Additive column migrations kept by hand.
+#
+# Superseded by `migrate.sync_columns`, which derives the same thing from the
+# models — the list is retained because these ran against live databases and
+# removing them changes nothing, while a statement here that the derivation
+# would phrase differently is worth keeping stable. New columns need no entry.
 _COLUMN_MIGRATIONS = (
     "ALTER TABLE scouting_records ADD COLUMN IF NOT EXISTS session_comment TEXT;",
     "ALTER TABLE pests ADD COLUMN IF NOT EXISTS pressure_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.5;",
@@ -57,6 +60,10 @@ async def lifespan(_: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         for stmt in _COLUMN_MIGRATIONS:
             await conn.exec_driver_sql(stmt)
+        # Then everything the models have gained since. Additive only, and
+        # derived rather than remembered — forgetting an entry here is what
+        # took the API down with a missing `fertilisers.is_organic`.
+        await sync_columns(conn)
     # Say at boot which optional integrations are closed. Without this the
     # first symptom is a scout in a greenhouse getting a 503 on submit, which
     # is the worst possible place to discover a missing environment variable.

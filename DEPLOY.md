@@ -119,6 +119,25 @@ The APK lands at `build/app/outputs/flutter-apk/app-release.apk`.
 > for a user login, which is why the integration only accepts scouting ingest
 > and nothing else. Rotate it if a device is lost.
 
+## Schema changes
+
+The API brings the database up to date on boot, in two steps:
+
+1. `Base.metadata.create_all` — creates tables that do not exist yet.
+2. `migrate.sync_columns` — compares the models against
+   `information_schema` and adds any column the models declare and the
+   database lacks.
+
+Step 2 exists because step 1 does not touch existing tables: add a column to a
+deployed model and the first query using it fails at runtime. It is additive
+only — it never drops a column, alters a type, or changes a constraint — and it
+logs every statement it applies, so a deploy log says what changed.
+
+A column that is `NOT NULL` with no default is added **nullable**, with a
+warning, because existing rows have nothing to backfill with. Set the values
+and add the constraint by hand. Anything beyond adding columns — renames, type
+changes, backfills — is a real migration and wants a real migration tool.
+
 ## Notes / trade-offs
 
 - **Single instance** = simple but no HA. For resilience later: move Postgres to RDS (with the PostGIS extension), run web/api on ECS/Fargate behind an ALB, and keep secrets in SSM Parameter Store / Secrets Manager.
