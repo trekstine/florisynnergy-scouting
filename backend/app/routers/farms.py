@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -45,6 +45,29 @@ async def create_farm(
 
 
 # ── Greenhouses ──
+async def _set_area(db: AsyncSession, gh: Greenhouse) -> None:
+    """Compute the block's hectares from its polygon.
+
+    PostGIS does this, not Python: the boundary is lat/lng, and treating those
+    as planar coordinates would give an area in square degrees. Casting to
+    geography measures on the spheroid.
+
+    Only the seed did this before, so every greenhouse added through the portal
+    carried a null area — which silently zeroed the fertigation area sum and
+    every m³/ha derived from it.
+    """
+    await db.execute(
+        text(
+            "UPDATE greenhouses "
+            "SET area_ha = ROUND((ST_Area(boundary::geography) / 10000.0)::numeric, 4) "
+            "WHERE id = :id"
+        ),
+        {"id": gh.id},
+    )
+    await db.commit()
+    await db.refresh(gh)
+
+
 async def _gh_out(db: AsyncSession, gh: Greenhouse) -> GreenhouseOut:
     bed_count = (
         await db.execute(
@@ -97,6 +120,7 @@ async def create_greenhouse(
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "qr_code_hash must be unique")
     await db.refresh(gh)
+    await _set_area(db, gh)
     return await _gh_out(db, gh)
 
 
@@ -123,6 +147,8 @@ async def update_greenhouse(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     await db.commit()
     await db.refresh(gh)
+    if payload.boundary is not None:
+        await _set_area(db, gh)
     return await _gh_out(db, gh)
 
 

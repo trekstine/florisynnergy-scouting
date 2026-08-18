@@ -155,7 +155,9 @@ export function SprayProgramBuilder({
 
   useEffect(() => {
     if (!open) return;
-    const head = editing?.records[0];
+    // `editing?.records[0]` guarded the object but not the array: a payload
+    // without `records` threw on the index and took the dialog down.
+    const head = editing?.records?.[0];
 
     if (head) {
       // Editing: every field comes off the program as it stands, so a manager
@@ -216,7 +218,7 @@ export function SprayProgramBuilder({
 
     (async () => {
       const priced: Item[] = [];
-      for (const r of editing.records) {
+      for (const r of editing.records ?? []) {
         if (r.chemical_id == null) continue;
         const rate = Number(r.rate) || 0;
         try {

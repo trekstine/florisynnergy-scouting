@@ -32,8 +32,16 @@ import type { ApprovalSlot, Role } from "@/lib/types";
  * paperwork would mean every other farm signs a sheet that misrepresents its
  * own process, so the lines are configuration.
  */
+const DOC_TYPES = [
+  { id: "spray_program", label: "Spray approval" },
+  { id: "fertigation", label: "Fertigation sheet" },
+];
+
 export default function ApprovalSettingsPage() {
-  const slots = useApprovalSlots();
+  // Spray and fertigation are signed by different people, so the lines are
+  // held per sheet rather than shared.
+  const [docType, setDocType] = useState(DOC_TYPES[0]!.id);
+  const slots = useApprovalSlots(docType);
   const save = useSaveApprovalSlot();
   const retire = useRetireApprovalSlot();
 
@@ -51,6 +59,7 @@ export default function ApprovalSettingsPage() {
     try {
       await save.mutateAsync({
         id: editing.id,
+        document_type: docType,
         label: editing.label.trim(),
         hint: editing.hint?.trim() || null,
         position: editing.position ?? rows.length,
@@ -97,6 +106,17 @@ export default function ApprovalSettingsPage() {
         subtitle="The signature lines every approval sheet carries"
         actions={
           <div className="flex items-center gap-2">
+            <Select
+              value={docType}
+              onChange={(e) => setDocType(e.target.value)}
+              className="!w-auto"
+            >
+              {DOC_TYPES.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </Select>
             <Button
               onClick={() =>
                 setEditing({ label: "", is_required: true, position: rows.length })

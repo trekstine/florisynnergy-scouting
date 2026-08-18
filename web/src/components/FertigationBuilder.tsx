@@ -93,11 +93,15 @@ export function FertigationBuilder({
       setEventDate(editing.event_date.slice(0, 10));
       setStartTime(editing.start_time ?? "07:00");
       setPhaseId(editing.phase_id ? String(editing.phase_id) : "");
+      // Guarded: a response missing one of these must not white-screen the
+      // form. An API a version behind, or a partial payload, should cost a
+      // blank field — not the whole dialog.
+      const blocks = editing.blocks ?? [];
       setBlockIds(
-        editing.blocks.map((b) => b.greenhouse_id).filter((x): x is number => x != null),
+        blocks.map((b) => b.greenhouse_id).filter((x): x is number => x != null),
       );
       const vols = Object.fromEntries(
-        editing.blocks
+        blocks
           .filter((b) => b.greenhouse_id != null && b.volume_m3 != null)
           .map((b) => [b.greenhouse_id as number, String(b.volume_m3)]),
       );
@@ -112,8 +116,8 @@ export function FertigationBuilder({
       setAcidRate(String(editing.acid_rate_l_m3));
       setApplicator(editing.applicator_id ? String(editing.applicator_id) : "");
       setComments(editing.comments ?? "");
-      setTanks(editing.tanks.length ? editing.tanks : defaultTanks());
-      setSources(editing.sources);
+      setTanks(editing.tanks?.length ? editing.tanks : defaultTanks());
+      setSources(editing.sources ?? []);
     } else {
       setActivity("fertigation");
       setEventDate(today);

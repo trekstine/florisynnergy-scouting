@@ -1025,6 +1025,7 @@ RoleLiteral = Literal["scout", "supervisor", "admin"]
 class ApprovalSlotIn(BaseModel):
     """A signature line on the approval sheet."""
 
+    document_type: str = Field(default="spray_program", max_length=40)
     label: str = Field(max_length=80)
     hint: str | None = Field(default=None, max_length=200)
     position: int = 0
@@ -1035,6 +1036,7 @@ class ApprovalSlotIn(BaseModel):
 
 
 class ApprovalSlotUpdate(BaseModel):
+    document_type: str | None = Field(default=None, max_length=40)
     label: str | None = Field(default=None, max_length=80)
     hint: str | None = Field(default=None, max_length=200)
     position: int | None = None
@@ -1048,6 +1050,7 @@ class ApprovalSlotOut(BaseModel):
 
     id: int
     farm_id: int | None
+    document_type: str
     label: str
     hint: str | None
     position: int

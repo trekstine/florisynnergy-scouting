@@ -745,10 +745,13 @@ export function useSprayFromRecommendation() {
 // ── Approval signing ────────────────────────────────────────────────────────
 const APPROVAL_KEYS = ["approval", "spray", "attachments"];
 
-export const useApprovalSlots = () =>
+export const useApprovalSlots = (documentType = "spray_program") =>
   useQuery({
-    queryKey: ["approval-slots"],
-    queryFn: () => api.get<ApprovalSlot[]>(`${V1}/approvals/slots`),
+    queryKey: ["approval-slots", documentType],
+    queryFn: () =>
+      api.get<ApprovalSlot[]>(
+        `${V1}/approvals/slots?document_type=${encodeURIComponent(documentType)}`,
+      ),
   });
 
 /** The signature state of one document, and whether it still matches. */

@@ -28,13 +28,19 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..deps import get_current_employee, require_roles
-from ..models import ApprovalSlot, Employee, Signature, SprayRecord
+from ..models import (
+    ApprovalSlot,
+    Employee,
+    Fertigation,
+    Signature,
+    SprayRecord,
+)
 from ..routers.media import MEDIA_DIR
 from ..schemas import (
     ApprovalSlotIn,
@@ -47,45 +53,65 @@ from ..schemas import (
     VoidRequest,
 )
 from ..security import verify_secret
-from ..services.signing import hash_spray_program
+from ..services.signing import hash_fertigation, hash_spray_program
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
 
 DOC_SPRAY = "spray_program"
+DOC_FERTIGATION = "fertigation"
 
 # What a farm gets before anyone configures anything. Chosen to match the
 # paper sheet these replace rather than to be minimal — a farm that only wants
 # one signature can retire the other two in Settings.
-DEFAULT_SLOTS = [
-    ("Prepared by", "Raised the program and calculated the dose", None, 0),
-    ("Approved by", "Authorises the chemical, the dose and the spend", "supervisor", 1),
-    ("Received by", "Collected the chemical and carried out the spray", None, 2),
-]
+DEFAULT_SLOTS: dict[str, list[tuple[str, str | None, str | None, int]]] = {
+    DOC_SPRAY: [
+        ("Prepared by", "Raised the program and calculated the dose", None, 0),
+        ("Approved by", "Authorises the chemical, the dose and the spend", "supervisor", 1),
+        ("Received by", "Collected the chemical and carried out the spray", None, 2),
+    ],
+    # The four lines on the supplied Credible Blooms fertiliser regime.
+    DOC_FERTIGATION: [
+        ("Prepared by", "Worked out the regime and the quantities", None, 0),
+        ("Approved by HOD", "Head of department", "supervisor", 1),
+        ("Approved by S.A.O.", "Senior agronomy officer", "supervisor", 2),
+        ("Approved by F.M.", "Farm manager", "admin", 3),
+    ],
+}
 
 
 # ───────────────────────────── Slot configuration ────────────────────────────
-async def _slots_for(db: AsyncSession, farm_id: int | None) -> list[ApprovalSlot]:
-    """The slots in force, seeding a farm's first set on demand.
+async def _slots_for(
+    db: AsyncSession, farm_id: int | None, document_type: str = DOC_SPRAY
+) -> list[ApprovalSlot]:
+    """The slots in force for this kind of sheet, seeded on first use.
 
-    Seeding here rather than in a migration means a farm added next year gets
-    a working sheet without anyone remembering to configure one.
+    Seeding here rather than in a migration means a document type added next
+    year gets a working sheet without anyone remembering to configure one.
     """
-    rows = list(
-        (
-            await db.execute(
-                select(ApprovalSlot)
-                .where(ApprovalSlot.is_active.is_(True))
-                .order_by(ApprovalSlot.position, ApprovalSlot.id)
-            )
-        ).scalars().all()
-    )
+
+    async def _fetch() -> list[ApprovalSlot]:
+        return list(
+            (
+                await db.execute(
+                    select(ApprovalSlot)
+                    .where(
+                        ApprovalSlot.is_active.is_(True),
+                        ApprovalSlot.document_type == document_type,
+                    )
+                    .order_by(ApprovalSlot.position, ApprovalSlot.id)
+                )
+            ).scalars().all()
+        )
+
+    rows = await _fetch()
     if rows:
         return rows
 
-    for label, hint, role, position in DEFAULT_SLOTS:
+    for label, hint, role, position in DEFAULT_SLOTS.get(document_type, []):
         db.add(
             ApprovalSlot(
                 farm_id=farm_id,
+                document_type=document_type,
                 label=label,
                 hint=hint,
                 required_role=role,
@@ -93,23 +119,16 @@ async def _slots_for(db: AsyncSession, farm_id: int | None) -> list[ApprovalSlot
             )
         )
     await db.commit()
-    return list(
-        (
-            await db.execute(
-                select(ApprovalSlot)
-                .where(ApprovalSlot.is_active.is_(True))
-                .order_by(ApprovalSlot.position, ApprovalSlot.id)
-            )
-        ).scalars().all()
-    )
+    return await _fetch()
 
 
 @router.get("/slots", response_model=list[ApprovalSlotOut])
 async def list_slots(
     db: AsyncSession = Depends(get_db),
     _: Employee = Depends(get_current_employee),
+    document_type: str = Query(default=DOC_SPRAY),
 ):
-    return await _slots_for(db, None)
+    return await _slots_for(db, None, document_type)
 
 
 @router.post("/slots", response_model=ApprovalSlotOut, status_code=status.HTTP_201_CREATED)
@@ -174,12 +193,30 @@ async def _spray_rows(db: AsyncSession, program_id: str) -> list[SprayRecord]:
     return rows
 
 
+async def _fertigation(db: AsyncSession, doc_id: str) -> Fertigation:
+    row = (
+        await db.execute(select(Fertigation).where(Fertigation.doc_id == doc_id))
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Fertigation not found")
+    return row
+
+
 async def _current_hash(db: AsyncSession, doc_type: str, doc_id: str) -> str:
-    if doc_type != DOC_SPRAY:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"Unknown document type '{doc_type}'"
-        )
-    return hash_spray_program(await _spray_rows(db, doc_id))
+    """What this document currently says, as a fingerprint.
+
+    Every signable document type needs a case here. Missing one is not a
+    cosmetic gap: the sheet's whole signature block asks for this first, gets
+    an error, and renders nothing at all — which is how fertigation ended up
+    with no sign-off despite the slots being configured.
+    """
+    if doc_type == DOC_SPRAY:
+        return hash_spray_program(await _spray_rows(db, doc_id))
+    if doc_type == DOC_FERTIGATION:
+        return hash_fertigation(await _fertigation(db, doc_id))
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST, f"Unknown document type '{doc_type}'"
+    )
 
 
 async def _signatures(
@@ -202,7 +239,7 @@ async def _signatures(
 async def _state(
     db: AsyncSession, doc_type: str, doc_id: str, farm_id: int | None = None
 ) -> ApprovalState:
-    slots = await _slots_for(db, farm_id)
+    slots = await _slots_for(db, farm_id, doc_type)
     sigs = await _signatures(db, doc_type, doc_id)
     live = [s for s in sigs if s.voided_at is None]
     current = await _current_hash(db, doc_type, doc_id)

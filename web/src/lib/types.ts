@@ -551,6 +551,8 @@ export interface Recommendation {
 export interface ApprovalSlot {
   id: number;
   farm_id: number | null;
+  /** Which sheet this line appears on — spray and fertigation differ. */
+  document_type: string;
   label: string;
   hint: string | null;
   position: number;

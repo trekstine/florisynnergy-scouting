@@ -613,6 +613,10 @@ class ApprovalSlot(Base):
     farm_id: Mapped[int | None] = mapped_column(
         ForeignKey("farms.id", ondelete="CASCADE")
     )
+    # Which sheet this line appears on. A spray authorisation and a fertiliser
+    # regime are signed by different people — the supplied regime carries
+    # Prepared, HOD, S.A.O. and F.M., which is not the spray chain.
+    document_type: Mapped[str] = mapped_column(String(40), default="spray_program")
     # What the sheet calls this line, e.g. "Approved by".
     label: Mapped[str] = mapped_column(String(80), nullable=False)
     # A note printed under the line, e.g. "Authorises the spend and the mix".

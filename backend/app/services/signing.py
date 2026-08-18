@@ -100,6 +100,76 @@ def spray_program_content(records: list[SprayRecord]) -> dict[str, Any]:
     }
 
 
+def fertigation_content(fert: Any) -> dict[str, Any]:
+    """The signable content of a fertigation sheet.
+
+    Same principle as a spray programme: everything that changes what went on
+    the crop, what it cost, or how much water carried it. Tanks and their lines
+    are sorted so the same sheet hashes the same however the rows come back.
+    """
+    tanks = sorted(
+        (
+            {
+                "code": t.code,
+                "volume_l": _num(t.volume_l),
+                "sets": _num(t.sets),
+                "lines": sorted(
+                    (
+                        {
+                            "code": ln.fertiliser_code,
+                            "quantity": _num(ln.quantity),
+                            "unit": ln.unit,
+                            "unit_price": _num(ln.unit_price),
+                        }
+                        for ln in t.lines
+                    ),
+                    key=lambda x: json.dumps(x, sort_keys=True, default=str),
+                ),
+            }
+            for t in fert.tanks
+        ),
+        key=lambda x: str(x["code"]),
+    )
+    blocks = sorted(
+        (
+            {"name": b.name, "area_ha": _num(b.area_ha), "volume_m3": _num(b.volume_m3)}
+            for b in getattr(fert, "blocks", [])
+        ),
+        key=lambda x: str(x["name"]),
+    )
+    sources = sorted(
+        (
+            {
+                "source": s.source,
+                "volume_m3": _num(s.volume_m3),
+                "ec": _num(s.ec),
+                "ph": _num(s.ph),
+            }
+            for s in getattr(fert, "sources", [])
+        ),
+        key=lambda x: json.dumps(x, sort_keys=True, default=str),
+    )
+    return {
+        "version": HASH_VERSION,
+        "doc_id": fert.doc_id,
+        "activity": fert.activity,
+        "event_date": _date(fert.event_date),
+        "phase": fert.phase,
+        "type_of_application": fert.type_of_application,
+        "volume_m3": _num(fert.volume_m3),
+        "area_ha": _num(fert.area_ha),
+        "fertiliser_rate_l_m3": _num(fert.fertiliser_rate_l_m3),
+        "acid_rate_l_m3": _num(fert.acid_rate_l_m3),
+        "blocks": blocks,
+        "sources": sources,
+        "tanks": tanks,
+    }
+
+
+def hash_fertigation(fert: Any) -> str:
+    return content_hash(fertigation_content(fert))
+
+
 def content_hash(content: dict[str, Any]) -> str:
     """A stable SHA-256 over the canonical content."""
     canonical = json.dumps(
