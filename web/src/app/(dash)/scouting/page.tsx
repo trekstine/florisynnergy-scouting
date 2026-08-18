@@ -379,18 +379,28 @@ export default function ScoutingPage() {
 
       {/* Summary strip */}
       <div className="grid grid-cols-2 gap-3 px-6 md:grid-cols-4">
-        <Metric label={`Records ${rangeNoun}`.trim()} value={summary.n} />
+        <Metric
+          label={`Records ${rangeNoun}`.trim()}
+          value={summary.n}
+          hint="One record = one bed, one agent"
+        />
         <Metric
           label="Over ETL"
           value={summary.overEtl}
           tone={summary.overEtl ? "#dc2626" : undefined}
+          hint="Past the economic threshold — action warranted"
         />
         <Metric
           label="Unverified"
           value={summary.unverified}
           tone={summary.unverified ? "#f59e0b" : undefined}
+          hint="No GPS or QR proof the scout was at the bed"
         />
-        <Metric label="Avg severity" value={summary.avg.toFixed(1)} />
+        <Metric
+          label="Avg severity"
+          value={summary.avg.toFixed(1)}
+          hint="Across all records, on the 0–5 scale"
+        />
       </div>
 
       {/* Coverage strip */}
@@ -423,10 +433,24 @@ export default function ScoutingPage() {
                     color: on ? "#047857" : "#b91c1c",
                   }}
                 >
-                  {g.code ?? g.name.replace(/\D/g, "")}
+                  {/* Stripping the letters out of the name leaves nothing at
+                      all for a block named without a number, which is how an
+                      unlabelled chip appeared in the row. Fall back to the
+                      name rather than to empty. */}
+                  {g.code || g.name.replace(/\D/g, "") || g.name}
                 </span>
               );
             })}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-faint">
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[#10b98122]" />
+              scouted {rangeNoun}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[#dc262618]" />
+              not scouted {rangeNoun}
+            </span>
           </div>
           {scoutSummary.data && scoutSummary.data.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-3">
@@ -437,7 +461,8 @@ export default function ScoutingPage() {
                 >
                   <div className="text-sm font-semibold text-ink">{s.name}</div>
                   <div className="text-xs text-ink-faint">
-                    {s.records} records · {s.greenhouses_visited} GH ·{" "}
+                    {s.records} records · {s.greenhouses_visited} greenhouse
+                    {s.greenhouses_visited === 1 ? "" : "s"} · last scouted{" "}
                     {relativeTime(s.last_seen)}
                   </div>
                 </div>
@@ -492,24 +517,46 @@ export default function ScoutingPage() {
                     onClick={() => setSelectedId(x.r.id)}
                     className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-surface"
                   >
+                    {/* The number on its own read as a count. It is a
+                        severity, on a 0–5 scale, and the tile now says so. */}
                     <span
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold"
+                      className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg leading-none"
                       style={{
                         backgroundColor: `${severityHex(x.r.severity)}33`,
                         color: "#0f172a",
                       }}
                     >
-                      {x.r.severity}
+                      <span className="text-[8px] font-semibold uppercase tracking-wider opacity-60">
+                        sev
+                      </span>
+                      <span className="mt-0.5 text-sm font-bold">
+                        {x.r.severity}
+                        <span className="text-[9px] font-semibold opacity-60">/5</span>
+                      </span>
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 text-sm font-semibold text-ink">
                         {x.ghLabel}
                         {x.r.bed_code && ` · ${bedLabel(x.r.bed_code)}`} · {x.target}
                       </span>
+                      {/* Every value on this line was a bare word between
+                          dots — "Pink Floyd" is a rose, "Adult" a life stage,
+                          and nothing said which was which. Each carries its
+                          own field name now. */}
                       <span className="mt-0.5 block truncate text-xs text-ink-faint">
-                        {SCOUTING_LABEL[x.r.scouting_for]} · {x.varietyLabel} ·{" "}
-                        {x.scoutLabel} · {x.r.stage ?? "stage n/a"} ·{" "}
-                        {formatDateTime(x.r.recorded_at)}
+                        <Named label="Scouted for">
+                          {SCOUTING_LABEL[x.r.scouting_for]}
+                        </Named>
+                        {" · "}
+                        <Named label="Variety">{x.varietyLabel}</Named>
+                        {" · "}
+                        <Named label="Scout">{x.scoutLabel}</Named>
+                        {" · "}
+                        <Named label="Stage">{x.r.stage ?? "not recorded"}</Named>
+                        {" · "}
+                        <Named label="Recorded">
+                          {formatDateTime(x.r.recorded_at)}
+                        </Named>
                       </span>
 
                       {/* What the scout actually recorded, beyond the severity
@@ -518,29 +565,34 @@ export default function ScoutingPage() {
                           observation is mostly in these fields. */}
                       <span className="mt-1 flex flex-wrap items-center gap-1.5">
                         {x.r.location_on_plant && (
-                          <Chip icon={<Leaf size={10} />}>{x.r.location_on_plant}</Chip>
+                          <Chip icon={<Leaf size={10} />} label="on plant">
+                            {x.r.location_on_plant}
+                          </Chip>
                         )}
                         {x.r.beneficials_count > 0 && (
                           <Chip icon={<ShieldCheck size={10} />} tone="#047857">
-                            {x.r.beneficials_count} beneficials
+                            {x.r.beneficials_count} beneficial
+                            {x.r.beneficials_count === 1 ? "" : "s"} counted
                           </Chip>
                         )}
                         {x.r.sticky_trap_bug_count > 0 && (
                           <Chip icon={<Bug size={10} />}>
-                            {x.r.sticky_trap_bug_count} on trap
+                            {x.r.sticky_trap_bug_count} caught on sticky trap
                           </Chip>
                         )}
                         {x.r.lure_bug_count > 0 && (
                           <Chip icon={<Bug size={10} />}>
-                            {x.r.lure_bug_count} in lure
+                            {x.r.lure_bug_count} caught in lure
                           </Chip>
                         )}
                         {x.r.fcm_count > 0 && (
-                          <Chip icon={<Bug size={10} />}>{x.r.fcm_count} FCM</Chip>
+                          <Chip icon={<Bug size={10} />}>
+                            {x.r.fcm_count} false codling moth
+                          </Chip>
                         )}
                         {x.r.image_url && (
                           <Chip icon={<Camera size={10} />} tone="#0369a1">
-                            photo
+                            field photo
                           </Chip>
                         )}
                       </span>
@@ -612,13 +664,26 @@ export default function ScoutingPage() {
 }
 
 /** A small fact off the record — worth showing, not worth a column. */
+/** A value with its field name, so a bare word is never left to be guessed. */
+function Named({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span>
+      <span className="opacity-70">{label} </span>
+      {children}
+    </span>
+  );
+}
+
 function Chip({
   icon,
   tone,
+  label,
   children,
 }: {
   icon: React.ReactNode;
   tone?: string;
+  /** For chips whose value alone is ambiguous — "Middle" of what? */
+  label?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -627,19 +692,27 @@ function Chip({
       style={{ color: tone ?? "#64748b" }}
     >
       {icon}
+      {label && <span className="opacity-70">{label}</span>}
       {children}
     </span>
   );
 }
 
+/**
+ * A headline number with its name — and, where the name is jargon, what it
+ * means. "Over ETL" is a term of art; a manager reading the portal for the
+ * first time should not have to ask.
+ */
 function Metric({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: number | string;
   tone?: string;
+  hint?: string;
 }) {
   return (
     <div className="rounded-xl border border-line bg-white p-4 shadow-card">
@@ -650,6 +723,7 @@ function Metric({
       >
         {value}
       </div>
+      {hint && <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">{hint}</div>}
     </div>
   );
 }
