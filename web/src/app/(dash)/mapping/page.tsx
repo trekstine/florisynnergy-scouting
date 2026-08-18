@@ -103,7 +103,11 @@ export default function MappingPage() {
 
   return (
     <div className="flex h-full">
-      <div className="relative min-w-0 flex-1">
+      {/* `isolate` gives the map its own stacking context. Leaflet sets
+          z-index up to 1000 on its own controls, and `relative` alone creates
+          no context — so those values competed with the rest of the page and
+          painted the bed dialog underneath the map. */}
+      <div className="relative isolate min-w-0 flex-1">
         {greenhouses.data && (
           <MappingMap
             greenhouses={greenhouses.data}

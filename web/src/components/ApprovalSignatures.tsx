@@ -282,7 +282,7 @@ function SignDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 print:hidden">
+    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-ink/40 p-4 print:hidden">
       <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>

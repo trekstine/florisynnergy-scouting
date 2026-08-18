@@ -113,7 +113,9 @@ function MapView() {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <div className="relative min-w-0 flex-1">
+        {/* Isolated so Leaflet's z-index cannot escape the map — see
+            the mapping page for what that cost. */}
+        <div className="relative isolate min-w-0 flex-1">
           {pressure.data && (
             <PressureMap
               data={pressure.data}

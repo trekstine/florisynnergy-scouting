@@ -313,7 +313,8 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <div className="relative h-[440px] w-full">
+          {/* Isolated so Leaflet's z-index stays inside the card. */}
+          <div className="relative isolate h-[440px] w-full">
             {pressure.data ? (
               <>
                 <PressureMap

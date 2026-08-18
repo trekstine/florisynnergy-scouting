@@ -68,7 +68,7 @@ export function RoundDrawer({
   const cleanBeds = (d?.entries.length ?? 0) - findings.length;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-[1200] flex justify-end">
       {/* The program stays visible behind the scrim — that is the point. */}
       <button
         aria-label="Close"

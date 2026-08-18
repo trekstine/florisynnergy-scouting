@@ -698,7 +698,7 @@ function RecordDetail({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/30"
+      className="fixed inset-0 z-[1200] flex justify-end bg-black/30"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

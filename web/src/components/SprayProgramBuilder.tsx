@@ -379,7 +379,7 @@ export function SprayProgramBuilder({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
+    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-ink/40 p-4">
       <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-line px-6 py-4">
           <div>
