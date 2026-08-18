@@ -42,7 +42,15 @@ async def check_spray(
     chemical_id: int | None,
     pest_id: int | None = None,
     disease_id: int | None = None,
+    exclude_program_id: str | None = None,
 ) -> list[Issue]:
+    """Screen one product for this block.
+
+    ``exclude_program_id`` leaves a programme out of its own history. Editing
+    rewrites a programme in place, so without this the rows being replaced count
+    as a prior spray and the programme fails RAC rotation against itself — every
+    edit blocked, on a resistance warning about its own chemical.
+    """
     if chemical_id is None:
         return [Issue("block", "no_chemical", "No chemical selected for this intervention.")]
     chem = await db.get(Chemical, chemical_id)
@@ -83,6 +91,11 @@ async def check_spray(
                     SprayRecord.greenhouse_id == greenhouse_id,
                     SprayRecord.rac_code == chem.rac_code,
                     SprayRecord.recorded_at >= since,
+                    *(
+                        [SprayRecord.program_id != exclude_program_id]
+                        if exclude_program_id
+                        else []
+                    ),
                 )
                 .order_by(SprayRecord.recorded_at.desc())
                 .limit(1)

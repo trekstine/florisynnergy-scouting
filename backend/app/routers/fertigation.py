@@ -355,7 +355,16 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
             )
         ).scalars()
     }
+    # Clear the children and push the DELETEs to the database before adding
+    # replacements. SQLAlchemy's unit of work emits INSERTs before DELETEs for
+    # the same table, so re-saving an edit that keeps the same greenhouses
+    # would insert a row that collides with the one not yet deleted —
+    # uq_fertigation_block, and every edit rejected.
     row.blocks.clear()
+    row.tanks.clear()
+    row.sources.clear()
+    await db.flush()
+
     for i, block_in in enumerate(payload.blocks):
         gh = houses.get(block_in.greenhouse_id)
         if gh is None:
@@ -386,7 +395,6 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
     stock_l = calc.stock_required_l(row.volume_m3, row.fertiliser_rate_l_m3)
     acid_l = calc.stock_required_l(row.volume_m3, row.acid_rate_l_m3)
 
-    row.tanks.clear()
     for tank_in in payload.tanks:
         tank = FertigationTank(
             code=tank_in.code.strip().upper(),
@@ -418,7 +426,6 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
             line.cost = calc.line_cost(line.quantity, sets, line.unit_price)
         row.tanks.append(tank)
 
-    row.sources.clear()
     for src in payload.sources:
         row.sources.append(FertigationSource(**src.model_dump()))
 

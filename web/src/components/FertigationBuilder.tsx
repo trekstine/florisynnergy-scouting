@@ -885,10 +885,21 @@ export function FertigationBuilder({
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-line bg-surface px-6 py-3">
-          <span className="flex items-center gap-2 text-sm">
-            <strong className="tabular-nums text-ink">{money(d.cost)}</strong>
-            {warnings.length > 0 && (
-              <Badge color="#d97706">{warnings.length} warning</Badge>
+          {/* The error lives beside the button as well as at the top: the
+              body scrolls and the footer does not, so a rejected save used to
+              report itself somewhere the reader could not see. */}
+          <span className="flex min-w-0 items-center gap-2 text-sm">
+            {error ? (
+              <span className="truncate font-semibold text-red-700" title={error}>
+                {error}
+              </span>
+            ) : (
+              <>
+                <strong className="tabular-nums text-ink">{money(d.cost)}</strong>
+                {warnings.length > 0 && (
+                  <Badge color="#d97706">{warnings.length} warning</Badge>
+                )}
+              </>
             )}
           </span>
           <span className="flex items-center gap-2">

@@ -204,6 +204,8 @@ async def _build_program(
     payload: SprayProgramCreate,
     program_id: str,
     current: Employee,
+    *,
+    rewriting: bool = False,
 ) -> tuple[list[SprayRecord], Recommendation | None]:
     """Screen, dose and cost a program's products.
 
@@ -226,6 +228,9 @@ async def _build_program(
             chemical_id=item.chemical_id,
             pest_id=rec.pest_id if rec else None,
             disease_id=rec.disease_id if rec else None,
+            # On an edit the rows being replaced are still on file; counting
+            # them would fail the programme against itself.
+            exclude_program_id=program_id if rewriting else None,
         )
         all_blocking += [i.message for i in issues if i.level == "block"]
 
@@ -440,7 +445,9 @@ async def update_spray_program(
 
     # Keep the program's identity: the same id, so the approval sheet URL, the
     # filed attachments and any link from a scouting report all still resolve.
-    records, rec = await _build_program(db, payload, program_id, current)
+    records, rec = await _build_program(
+        db, payload, program_id, current, rewriting=True
+    )
 
     # The rebuilt rows replace the old ones. Deleting after the build means a
     # compliance rejection leaves the original program untouched.

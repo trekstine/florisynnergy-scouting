@@ -698,6 +698,16 @@ export function SprayProgramBuilder({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-surface px-6 py-4">
+          {/* Repeated here because the body scrolls and this bar does not —
+              a rejected save reported itself off-screen otherwise. */}
+          {error && (
+            <p
+              className="w-full truncate text-sm font-semibold text-red-700"
+              title={error}
+            >
+              {error}
+            </p>
+          )}
           <div className="flex items-center gap-5">
             <div>
               <p className="text-[11px] font-medium uppercase tracking-wide text-ink-faint">
