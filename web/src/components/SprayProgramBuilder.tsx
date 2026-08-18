@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 
 import { Badge, Button, ErrorBox, Field, Select, TextInput } from "@/components/ui";
 import { isHazardous, money } from "@/lib/format";
+import { looseNumber } from "@/lib/parse";
 import {
   useChemicals,
   useCreateSprayProgram,
@@ -42,27 +43,6 @@ function doseFromWater(volume: number, rate: number): number | null {
   return Math.round((volume * rate) / 100_000 * 1000) / 1000;
 }
 
-/**
- * Read a number out of a stored spray field.
- *
- * `rate` and `volume_of_water` are text columns on the record — they hold
- * whatever the sheet or the app wrote, which is often "50 ml" or "1000 L"
- * rather than a bare number. `Number("50 ml")` is NaN, and the old code
- * collapsed that to `0`, which the server rejects (the field is `gt=0`,
- * so zero is invalid where null is fine). Strip to the numeric part and
- * return null when there genuinely is not one.
- */
-function looseNumber(raw: string | number | null | undefined): number | null {
-  if (raw == null) return null;
-  if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? raw : null;
-  // Anchored to the front on purpose: "50 ml/100L" is a rate of 50, but
-  // "ml/100L" is a unit with no rate in it at all — an unanchored match would
-  // read the 100 out of the denominator and dose against it.
-  const match = raw.replace(/,/g, "").trim().match(/^-?\d+(\.\d+)?/);
-  if (!match) return null;
-  const n = Number(match[0]);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
 
 interface Item {
   preview: SprayPreview;

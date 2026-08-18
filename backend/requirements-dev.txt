@@ -1,0 +1,11 @@
+# Test-only dependencies. Deliberately *not* in requirements.txt: the
+# production image installs that file, and pgserver bundles an entire
+# PostgreSQL — around a hundred megabytes of server that must never ship to a
+# farm.
+-r requirements.txt
+
+# A self-contained PostgreSQL, so the integration suite runs without Docker or
+# root. tests/conftest.py falls back to it only when the configured
+# DATABASE_URL is unreachable, and tests/pgshim.py stands in for PostGIS.
+# Point DATABASE_URL at a real PostGIS instance to run against the real thing.
+pgserver==0.1.4

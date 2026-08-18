@@ -8,3 +8,6 @@
 # Local tooling
 .claude/settings.local.json
 .DS_Store
+
+# pgserver's throwaway data directories, if one is ever created in-tree.
+florisynergy-pg-*/

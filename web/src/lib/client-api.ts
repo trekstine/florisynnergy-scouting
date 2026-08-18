@@ -21,7 +21,7 @@ const PROXY = "/api/proxy";
  * "[object Object]", so a 422 reached the screen saying nothing at all: the
  * save was rejected for a nameable reason and the form reported gibberish.
  */
-function readDetail(detail: unknown, fallback: string): string {
+export function readDetail(detail: unknown, fallback: string): string {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
     const parts = detail

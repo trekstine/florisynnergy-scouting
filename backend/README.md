@@ -64,13 +64,35 @@ are buffered on-device and submitted as one batch.
 ## Tests
 
 ```bash
-docker compose up -d db
-pip install -r requirements.txt
-pytest     # auto-skips if PostGIS is unreachable
+pip install -r requirements-dev.txt
+pytest                       # no Docker needed
 ```
 
-Covers geofencing seed, reference data, **idempotent batch + recommendation
-engine**, pressure heatmap, and role guards.
+The suite runs against a real PostgreSQL every time. If `DATABASE_URL` points
+at a live server it uses that; otherwise it starts a throwaway one from the
+`pgserver` wheel — no Docker, no root — and installs a stand-in for PostGIS
+(`tests/pgshim.py`). To run against genuine PostGIS:
+
+```bash
+docker compose up -d db      # DATABASE_URL then points at it
+pytest
+```
+
+Tests that assert on real spatial arithmetic are marked `needs_postgis` and
+skip under the stand-in, whose `ST_Area` returns a fixed figure. Everything
+else — constraints, cascades, flush ordering — is the real database.
+
+**Why it is built this way.** The suite used to skip itself wherever PostGIS
+was missing, so "51 passed, 7 skipped" meant the edit paths were never
+exercised. Three faults reached users through that gap, and every one of them
+was database behaviour no unit test could see: `uq_fertigation_block` firing
+because SQLAlchemy emits INSERTs before DELETEs, a spray programme failing the
+RAC rotation check against its own rows, and a router blanking a column it was
+only meant to read. They are now covered by `tests/test_editing.py`, and each
+of those tests has been confirmed to fail when its fix is reverted.
+
+Also covers geofencing seed, reference data, **idempotent batch +
+recommendation engine**, pressure heatmap, signing, and role guards.
 
 ## Layout
 

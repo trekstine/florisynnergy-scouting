@@ -119,6 +119,22 @@ The APK lands at `build/app/outputs/flutter-apk/app-release.apk`.
 > for a user login, which is why the integration only accepts scouting ingest
 > and nothing else. Rotate it if a device is lost.
 
+## Before you deploy
+
+Run both suites. They are quick and they run anywhere — the backend one starts
+its own PostgreSQL, so no Docker is required.
+
+```bash
+cd backend && pip install -r requirements-dev.txt && pytest
+cd ../web   && npm ci && npm run test && npm run typecheck && npm run lint
+```
+
+`pytest` exercises the API against a real database, including the paths that
+have broken in production: editing a spray programme, editing a fertigation
+sheet, and the refusals that protect a signed document. A green run is not
+proof the release is good, but a red one is proof it is not — do not deploy
+past a failure here.
+
 ## Schema changes
 
 The API brings the database up to date on boot, in two steps:

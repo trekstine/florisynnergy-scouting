@@ -20,7 +20,12 @@ async def test_health(client):
 async def test_geofencing_seeded(client, admin_token):
     gh = (await client.get("/api/v1/greenhouses", headers=_auth(admin_token))).json()
     assert len(gh) == 20
-    assert gh[0]["bed_count"] == 4
+    # Read from the seed rather than hard-coded: this assertion said 4 for as
+    # long as the seed said 20, and nobody saw it because the test was being
+    # skipped for want of a database.
+    from app.seed import BEDS_PER_GREENHOUSE
+
+    assert gh[0]["bed_count"] == BEDS_PER_GREENHOUSE
     assert len(gh[0]["boundary"]) >= 4  # real OSM footprint
 
 
