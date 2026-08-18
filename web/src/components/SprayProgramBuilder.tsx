@@ -42,6 +42,28 @@ function doseFromWater(volume: number, rate: number): number | null {
   return Math.round((volume * rate) / 100_000 * 1000) / 1000;
 }
 
+/**
+ * Read a number out of a stored spray field.
+ *
+ * `rate` and `volume_of_water` are text columns on the record — they hold
+ * whatever the sheet or the app wrote, which is often "50 ml" or "1000 L"
+ * rather than a bare number. `Number("50 ml")` is NaN, and the old code
+ * collapsed that to `0`, which the server rejects (the field is `gt=0`,
+ * so zero is invalid where null is fine). Strip to the numeric part and
+ * return null when there genuinely is not one.
+ */
+function looseNumber(raw: string | number | null | undefined): number | null {
+  if (raw == null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? raw : null;
+  // Anchored to the front on purpose: "50 ml/100L" is a rate of 50, but
+  // "ml/100L" is a unit with no rate in it at all — an unanchored match would
+  // read the 100 out of the denominator and dose against it.
+  const match = raw.replace(/,/g, "").trim().match(/^-?\d+(\.\d+)?/);
+  if (!match) return null;
+  const n = Number(match[0]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 interface Item {
   preview: SprayPreview;
   rate: number;
@@ -170,7 +192,9 @@ export function SprayProgramBuilder({
       setApplicationType(head.type_of_application ?? APPLICATION_TYPES[0]!);
       setCoverage(head.coverage ?? COVERAGES[0]!);
       setRei(head.rei ?? "");
-      setVolume(head.volume_of_water ?? "1000");
+      // The stored value is text and may carry a unit; the input is numeric,
+      // and "1000 L" in a number field shows as empty.
+      setVolume(String(looseNumber(head.volume_of_water) ?? 1000));
       setStartDate(head.start_date?.slice(0, 10) ?? today);
       setStartTime(head.start_time ?? "07:00");
       // A compliance override already recorded on the program stays on,
@@ -218,9 +242,10 @@ export function SprayProgramBuilder({
 
     (async () => {
       const priced: Item[] = [];
+      const dropped: string[] = [];
       for (const r of editing.records ?? []) {
         if (r.chemical_id == null) continue;
-        const rate = Number(r.rate) || 0;
+        const rate = looseNumber(r.rate);
         try {
           const result = await previewMutate({
             chemical_id: r.chemical_id,
@@ -229,20 +254,38 @@ export function SprayProgramBuilder({
             variety_code: r.variety_code,
             coverage: r.coverage,
             start_date: r.start_date,
-            volume_of_water_l: Number(r.volume_of_water) || null,
+            volume_of_water_l: looseNumber(r.volume_of_water),
+            // Null, not zero: the server's rate is `gt=0`, so sending 0 for a
+            // rate that would not parse rejected the product outright — and
+            // the rejection used to be swallowed, so the row simply vanished
+            // from the mix with nothing said.
             rate,
           });
           priced.push({
             preview: result,
-            rate,
+            rate: rate ?? 0,
             qty: result.qty,
             cost: result.cost_of_chemical,
           });
         } catch {
-          // One product that will not price should not empty the whole mix.
+          dropped.push(r.product ?? `Chemical #${r.chemical_id}`);
         }
       }
-      if (!cancelled) setItems(priced);
+      if (cancelled) return;
+      setItems(priced);
+      // A product that would not reprice is not a detail. The programme
+      // cannot be saved without at least one, and saving a mix that quietly
+      // lost a product would be worse than not saving at all.
+      if (dropped.length) {
+        setError(
+          `Could not reprice ${dropped.join(", ")} — ${
+            dropped.length === 1 ? "it has" : "they have"
+          } been left out of the mix. Add ${
+            dropped.length === 1 ? "it" : "them"
+          } again before saving, or the programme will be written without ` +
+            `${dropped.length === 1 ? "it" : "them"}.`,
+        );
+      }
     })();
 
     return () => {
@@ -345,6 +388,15 @@ export function SprayProgramBuilder({
     items.length > 0 && (blocking.length === 0 || override) && !busy;
 
   async function submit() {
+    // The server requires at least one product and answers an empty list with
+    // a validation error. Say it here, in words, rather than letting a 422
+    // come back from a field name the reader never sees.
+    if (items.length === 0) {
+      setError(
+        "A programme needs at least one product. Add one below before saving.",
+      );
+      return;
+    }
     setError(null);
     const body = {
       greenhouse_id: greenhouseId,

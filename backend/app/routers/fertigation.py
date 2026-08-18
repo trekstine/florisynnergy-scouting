@@ -332,12 +332,20 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
     month must not silently restate what this sheet cost.
     """
     for field in (
-        "activity", "event_date", "effective_from", "start_time", "phase_id",
+        "activity", "event_date", "start_time", "phase_id",
         "type_of_application", "volume_m3", "area_ha",
         "target_m3_per_ha", "weather", "fertiliser_rate_l_m3", "acid_rate_l_m3", "applicator_id", "comments",
-        "status", "reference",
+        "status",
     ):
         setattr(row, field, getattr(payload, field))
+
+    # `reference` and `effective_from` are only written when the caller sends
+    # them. Both default to None in the schema and the portal's edit form does
+    # not carry either, so setting them unconditionally erased a sheet's
+    # reference number every time somebody corrected a rate.
+    for field in ("reference", "effective_from"):
+        if field in payload.model_fields_set:
+            setattr(row, field, getattr(payload, field))
 
     # The phase name is snapshotted, so renaming a phase next season cannot
     # restate what a signed sheet covered.

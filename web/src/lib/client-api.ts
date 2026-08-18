@@ -12,6 +12,38 @@ export class ClientApiError extends Error {
 
 const PROXY = "/api/proxy";
 
+/**
+ * Turn whatever the API put in `detail` into a sentence.
+ *
+ * FastAPI answers a validation failure with `detail` as a *list* of objects —
+ * `[{loc: ["body","tanks",0,"lines",1,"unit"], msg: "Input should be a valid
+ * string"}]`. Passing that straight to `new Error()` stringifies it to
+ * "[object Object]", so a 422 reached the screen saying nothing at all: the
+ * save was rejected for a nameable reason and the form reported gibberish.
+ */
+function readDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        if (typeof d === "string") return d;
+        if (d && typeof d === "object") {
+          const { loc, msg } = d as { loc?: unknown[]; msg?: string };
+          // Drop the leading "body" — it is true of every field and tells the
+          // reader nothing about which one is wrong.
+          const where = Array.isArray(loc)
+            ? loc.filter((p) => p !== "body").join(" → ")
+            : "";
+          return where && msg ? `${where}: ${msg}` : (msg ?? "");
+        }
+        return "";
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${PROXY}${path}`, {
     ...init,
@@ -30,11 +62,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ClientApiError(401, "Session expired");
   }
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail = res.statusText || `Request failed (${res.status})`;
     try {
-      detail = (await res.json())?.detail ?? detail;
+      detail = readDetail((await res.json())?.detail, detail);
     } catch {
-      /* ignore */
+      /* a non-JSON body — the status line is all we have */
     }
     throw new ClientApiError(res.status, detail);
   }
