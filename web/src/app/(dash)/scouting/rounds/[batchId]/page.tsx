@@ -233,23 +233,35 @@ export default function ScoutingRoundPage() {
                 <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
                   <th className="px-5 py-2.5 font-semibold">Time</th>
                   <th className="px-3 py-2.5 font-semibold">Bed</th>
-                  <th className="px-3 py-2.5 font-semibold">Type</th>
-                  <th className="px-3 py-2.5 font-semibold">Target</th>
+                  {/* "Type" was the scouting method and "Target" the thing
+                      found — neither name said so, and side by side they read
+                      as two halves of one idea. */}
+                  <th className="px-3 py-2.5 font-semibold">Scouting method</th>
+                  <th className="px-3 py-2.5 font-semibold">Pest / Disease</th>
                   <th className="px-3 py-2.5 font-semibold">Variety</th>
-                  <th className="px-3 py-2.5 font-semibold">Stage</th>
-                  <th className="px-3 py-2.5 font-semibold">On plant</th>
+                  <th className="px-3 py-2.5 font-semibold">Crop stage</th>
+                  <th className="px-3 py-2.5 font-semibold">Where on plant</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Counts</th>
-                  <th className="px-3 py-2.5 text-right font-semibold">Severity</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Severity (0–5)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {shown.map((e) => {
+                  // Which of the two it is matters agronomically — a disease
+                  // and a pest with similar names get very different
+                  // chemistry — so the row says which, not just the name.
                   const target =
                     e.disease_id != null
                       ? (diseaseName.get(e.disease_id) ?? "Disease")
                       : e.pest_id != null
                         ? (pestName.get(e.pest_id) ?? "Pest")
                         : "—";
+                  const targetKind =
+                    e.disease_id != null
+                      ? "disease"
+                      : e.pest_id != null
+                        ? "pest"
+                        : null;
                   const counts = [
                     e.sticky_trap_bug_count > 0 && `${e.sticky_trap_bug_count} trap`,
                     e.lure_bug_count > 0 && `${e.lure_bug_count} lure`,
@@ -280,6 +292,11 @@ export default function ScoutingRoundPage() {
                         </td>
                         <td className="px-3 py-2.5 align-top font-medium text-ink">
                           {target}
+                          {targetKind && (
+                            <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+                              {targetKind}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2.5 align-top text-ink-soft">
                           {e.variety_code ?? "—"}

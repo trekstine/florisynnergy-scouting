@@ -242,19 +242,38 @@ export default function AnalyticsPage() {
     [spray.data, filters],
   );
 
-  const { rows, cols, lookup } = useMemo(() => {
+  /**
+   * Two grids, not one.
+   *
+   * Pests and diseases were stacked on a single matrix, so Botrytis sat
+   * between Black Spot and Caterpillars with nothing to say which was which —
+   * and they are not comparable: a mildew reading and a thrips reading mean
+   * different interventions, different chemistry and different thresholds.
+   * The columns stay shared (every greenhouse the filter covers appears on
+   * both) so the two grids line up and can be read against each other.
+   */
+  const { pestGrid, diseaseGrid } = useMemo(() => {
     const cells = matrix.data ?? [];
-    const r = new Set<string>();
-    const c = new Set<string>();
-    const map = new Map<string, number>();
-    for (const x of cells) {
-      r.add(x.pest);
-      c.add(x.greenhouse);
-      map.set(`${x.pest}|${x.greenhouse}`, x.avg_severity);
-    }
     const colSort = (a: string, b: string) =>
       (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0);
-    return { rows: [...r].sort(), cols: [...c].sort(colSort), lookup: map };
+
+    // Columns come from every cell regardless of kind, so a greenhouse with
+    // only disease records still holds its place on the pest grid — an empty
+    // column is information, and dropping it would misalign the two.
+    const cols = [...new Set(cells.map((x) => x.greenhouse))].sort(colSort);
+
+    const gridFor = (kind: "pest" | "disease") => {
+      const mine = cells.filter((x) => x.kind === kind);
+      const lookup = new Map<string, number>();
+      for (const x of mine) lookup.set(`${x.pest}|${x.greenhouse}`, x.avg_severity);
+      return {
+        rows: [...new Set(mine.map((x) => x.pest))].sort(),
+        cols,
+        lookup,
+      };
+    };
+
+    return { pestGrid: gridFor("pest"), diseaseGrid: gridFor("disease") };
   }, [matrix.data]);
 
   /**
@@ -1130,7 +1149,7 @@ export default function AnalyticsPage() {
       {activeTab === "greenhouses" && (
         <>
           <div className="px-6">
-            <Card>
+            {/* <Card>
               <CardHeader
                 title="Greenhouse activity"
                 subtitle="Where scouting activity is concentrated."
@@ -1148,21 +1167,45 @@ export default function AnalyticsPage() {
                   />
                 )}
               </div>
-            </Card>
+            </Card> */}
           </div>
-          <div className="px-6">
+          <div className="space-y-5 px-6">
             <Card>
               <CardHeader
-                title="Pest / Disease × greenhouse matrix"
-                subtitle="Average severity (green → red)"
+                title="Pests by greenhouse"
+                subtitle="Average severity per pest, per block. Columns are greenhouse numbers; darker is worse."
               />
               <div className="p-4">
                 {matrix.isLoading && <Spinner />}
-                {!matrix.isLoading && rows.length === 0 && (
+                {!matrix.isLoading && pestGrid.rows.length === 0 && (
                   <EmptyState>No pest records in range.</EmptyState>
                 )}
-                {rows.length > 0 && (
-                  <HeatMatrix rows={rows} cols={cols} value={(r, c) => lookup.get(`${r}|${c}`) ?? null} />
+                {pestGrid.rows.length > 0 && (
+                  <HeatMatrix
+                    rows={pestGrid.rows}
+                    cols={pestGrid.cols}
+                    value={(r, c) => pestGrid.lookup.get(`${r}|${c}`) ?? null}
+                  />
+                )}
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader
+                title="Diseases by greenhouse"
+                subtitle="Average severity per disease, per block. Same columns as the pest grid above."
+              />
+              <div className="p-4">
+                {matrix.isLoading && <Spinner />}
+                {!matrix.isLoading && diseaseGrid.rows.length === 0 && (
+                  <EmptyState>No disease records in range.</EmptyState>
+                )}
+                {diseaseGrid.rows.length > 0 && (
+                  <HeatMatrix
+                    rows={diseaseGrid.rows}
+                    cols={diseaseGrid.cols}
+                    value={(r, c) => diseaseGrid.lookup.get(`${r}|${c}`) ?? null}
+                  />
                 )}
               </div>
             </Card>
@@ -1172,7 +1215,7 @@ export default function AnalyticsPage() {
 
       {activeTab === "trends" && (
         <>
-          <div className="px-6">
+          {/* <div className="px-6">
             <Card>
               <CardHeader
                 title="Trend report"
@@ -1182,7 +1225,7 @@ export default function AnalyticsPage() {
                 {trend.isLoading ? <Spinner /> : <TrendChart data={trend.data ?? []} height={300} />}
               </div>
             </Card>
-          </div>
+          </div> */}
           {/* Per-agent trajectories — compare an agent against the
               interventions made against it. */}
           <div className="grid grid-cols-1 gap-5 px-6 lg:grid-cols-2">

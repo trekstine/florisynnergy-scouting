@@ -288,22 +288,32 @@ export function Donut({
   );
 }
 
-/** Pest × greenhouse severity heat matrix (custom — dense & scannable). */
+/**
+ * Severity heat matrix (custom — dense & scannable).
+ *
+ * The column headings are abbreviated to their number to keep the grid
+ * readable, which leaves "01 02 03…" meaning nothing on its own — so the
+ * corner cell names the axis rather than sitting empty.
+ */
 export function HeatMatrix({
   rows,
   cols,
   value,
+  colAxis = "Greenhouse",
 }: {
   rows: string[];
   cols: string[];
   value: (row: string, col: string) => number | null;
+  colAxis?: string;
 }) {
   return (
     <div className="overflow-auto">
       <table className="border-separate border-spacing-1 text-xs">
         <thead>
           <tr>
-            <th className="sticky left-0 z-10 bg-white p-1.5" />
+            <th className="sticky left-0 z-10 whitespace-nowrap bg-white p-1.5 pr-3 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+              {colAxis} →
+            </th>
             {cols.map((c) => (
               <th key={c} className="p-1 text-center font-medium text-ink-faint">
                 <span className="inline-block max-w-[40px] truncate" title={c}>

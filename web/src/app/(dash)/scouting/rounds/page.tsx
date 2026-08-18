@@ -350,7 +350,8 @@ function RoundsList() {
                   <h3 className="text-sm font-bold text-ink">{day.label}</h3>
                   <span className="text-xs text-ink-faint">
                     {day.rounds.length} report{day.rounds.length === 1 ? "" : "s"} ·{" "}
-                    {day.blocks} block{day.blocks === 1 ? "" : "s"} · {day.beds} beds
+                    {day.blocks} block{day.blocks === 1 ? "" : "s"} walked · {day.beds}{" "}
+                    beds walked
                   </span>
                   <span className="ml-auto flex flex-wrap items-center gap-2">
                     {day.findings > 0 ? (
@@ -367,18 +368,21 @@ function RoundsList() {
                         {day.hotspots === 1 ? "" : "s"}
                       </Badge>
                     )}
+                    {/* A bare coloured number reads as a count of something.
+                        It is a severity, and it is the worst one — say both,
+                        and say what it is out of. */}
                     {day.worst > 0 && (
                       <span
                         className="rounded px-1.5 py-0.5 text-xs font-bold text-white"
                         style={{ backgroundColor: severityHex(day.worst) }}
-                        title="Worst severity seen that day"
                       >
-                        {day.worst}
+                        Worst severity {day.worst}/5
                       </span>
                     )}
                     {day.programs > 0 && (
                       <Badge color="#0891b2">
-                        <SprayCan size={11} /> {day.programs}
+                        <SprayCan size={11} /> {day.programs} spray program
+                        {day.programs === 1 ? "" : "s"}
                       </Badge>
                     )}
                   </span>
@@ -406,9 +410,8 @@ function RoundsList() {
                               <span
                                 className="rounded px-1.5 py-0.5 text-[11px] font-bold text-white"
                                 style={{ backgroundColor: severityHex(r.max_severity) }}
-                                title="Worst severity in this round"
                               >
-                                {r.max_severity}
+                                Worst severity {r.max_severity}/5
                               </span>
                             )}
                             {r.hotspots > 0 && (
@@ -419,21 +422,26 @@ function RoundsList() {
                             )}
                             {r.programs > 0 ? (
                               <Badge color="#0891b2">
-                                <SprayCan size={11} /> {r.programs} program
+                                <SprayCan size={11} /> {r.programs} spray program
                                 {r.programs === 1 ? "" : "s"}
                               </Badge>
                             ) : r.findings > 0 ? (
-                              <Badge color="#d97706">No program yet</Badge>
+                              <Badge color="#d97706">No spray program yet</Badge>
                             ) : null}
                             {r.flagged > 0 && (
-                              <Badge color="#b45309">{r.flagged} flagged</Badge>
+                              <Badge color="#b45309">
+                                {r.flagged} flagged for review
+                              </Badge>
                             )}
                           </div>
 
-                          {/* Line 2 — the counts a manager scans. */}
+                          {/* Line 2 — the counts a manager scans.
+                              Every one of these carries its own noun. The
+                              icons alone were ambiguous ("1 of 2" of what?)
+                              and a tooltip is no use to somebody scanning. */}
                           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-soft">
                             <Stat icon={<MapPin size={11} />} title="Beds walked">
-                              {r.beds} bed{r.beds === 1 ? "" : "s"}
+                              {r.beds} bed{r.beds === 1 ? "" : "s"} walked
                               {r.clean_beds > 0 && (
                                 <span className="text-ink-faint">
                                   {" "}
@@ -441,64 +449,94 @@ function RoundsList() {
                                 </span>
                               )}
                             </Stat>
-                            <Stat icon={<Bug size={11} />} title="Findings">
-                              {r.findings} of {r.records}
+                            <Stat icon={<Bug size={11} />} title="Records with a finding">
+                              {r.findings} of {r.records} record
+                              {r.records === 1 ? "" : "s"} found something
                             </Stat>
                             {r.beneficials > 0 && (
                               <Stat icon={<ShieldCheck size={11} />} title="Beneficials counted">
-                                {r.beneficials} beneficials
+                                {r.beneficials} beneficials counted
                               </Stat>
                             )}
                             {r.photos > 0 && (
                               <Stat icon={<Camera size={11} />} title="Field photos">
-                                {r.photos}
+                                {r.photos} photo{r.photos === 1 ? "" : "s"}
                               </Stat>
                             )}
                             <Stat icon={<Clock size={11} />} title="Time in the block">
+                              Started{" "}
                               {new Date(r.started_at).toLocaleTimeString("en-GB", {
                                 hour: "2-digit",
                                 minute: "2-digit",
                               })}
-                              {r.duration_minutes > 0 && ` · ${r.duration_minutes} min`}
+                              {r.duration_minutes > 0 &&
+                                ` · ${r.duration_minutes} min in block`}
                             </Stat>
-                            <span className="text-ink-faint">{r.scout ?? "Unknown scout"}</span>
+                            <span className="text-ink-faint">
+                              Scouted by {r.scout ?? "unknown scout"}
+                            </span>
                           </div>
 
-                          {/* Line 3 — what was actually seen. */}
+                          {/* Line 3 — what was actually seen.
+                              Three differently-coloured chip families with no
+                              captions asked the reader to learn a colour code.
+                              "Thrips" next to "PNK" is a pest next to a rose
+                              variety, and nothing on the row said so. */}
                           {(r.pests.length > 0 ||
                             r.diseases.length > 0 ||
                             r.varieties.length > 0) && (
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                              {r.pests.map((n) => (
-                                <span
-                                  key={`p-${n}`}
-                                  className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                              {r.pests.length > 0 && (
+                                <ChipGroup label={r.pests.length === 1 ? "Pest" : "Pests"}>
+                                  {r.pests.map((n) => (
+                                    <span
+                                      key={`p-${n}`}
+                                      className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+                                    >
+                                      {n}
+                                    </span>
+                                  ))}
+                                </ChipGroup>
+                              )}
+                              {r.diseases.length > 0 && (
+                                <ChipGroup
+                                  label={r.diseases.length === 1 ? "Disease" : "Diseases"}
                                 >
-                                  {n}
-                                </span>
-                              ))}
-                              {r.diseases.map((n) => (
-                                <span
-                                  key={`d-${n}`}
-                                  className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-800"
+                                  {r.diseases.map((n) => (
+                                    <span
+                                      key={`d-${n}`}
+                                      className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-800"
+                                    >
+                                      {n}
+                                    </span>
+                                  ))}
+                                </ChipGroup>
+                              )}
+                              {r.varieties.length > 0 && (
+                                <ChipGroup
+                                  label={
+                                    r.varieties.length === 1 ? "Variety" : "Varieties"
+                                  }
                                 >
-                                  {n}
-                                </span>
-                              ))}
-                              {r.varieties.map((v) => (
-                                <span
-                                  key={`v-${v}`}
-                                  className="flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-ink-faint"
-                                >
-                                  <Leaf size={10} /> {v}
-                                </span>
-                              ))}
+                                  {r.varieties.map((v) => (
+                                    <span
+                                      key={`v-${v}`}
+                                      className="flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-ink-faint"
+                                    >
+                                      <Leaf size={10} /> {v}
+                                    </span>
+                                  ))}
+                                </ChipGroup>
+                              )}
                             </div>
                           )}
 
                           {r.session_comment && (
-                            <p className="mt-1.5 truncate text-xs italic text-ink-faint">
-                              &ldquo;{r.session_comment}&rdquo;
+                            <p className="mt-1.5 truncate text-xs text-ink-faint">
+                              <span className="font-semibold">Scout&apos;s remark: </span>
+                              <span className="italic">
+                                &ldquo;{r.session_comment}&rdquo;
+                              </span>
                             </p>
                           )}
                         </Link>
@@ -523,6 +561,24 @@ function Filter({ label, children }: { label: string; children: React.ReactNode 
       </span>
       {children}
     </label>
+  );
+}
+
+/** A captioned run of chips — the caption is what makes the colour redundant. */
+function ChipGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+        {label}
+      </span>
+      {children}
+    </span>
   );
 }
 
