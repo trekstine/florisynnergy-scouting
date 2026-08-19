@@ -148,10 +148,10 @@ function FertigationReport() {
 
         {/* Said once, plainly, rather than left for somebody to discover after
             they have budgeted against it. */}
-        <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+        {/* <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
           <strong>Costs are indicative.</strong> The fertiliser register carries
           placeholder prices until the farm&apos;s invoice prices are entered.
-        </p>
+        </p> */}
 
         {rows.length === 0 ? (
           <p className="py-16 text-center text-sm text-ink-faint">

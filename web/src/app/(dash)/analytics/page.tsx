@@ -1755,7 +1755,7 @@ export default function AnalyticsPage() {
 
       {activeTab === "fert-cost" && (
         <div className="space-y-5 px-6">
-          <PlaceholderPriceNote />
+          {/* <PlaceholderPriceNote /> */}
           <Card>
             <CardHeader
               title="Fertigation cost"
@@ -1937,7 +1937,7 @@ export default function AnalyticsPage() {
 
       {activeTab === "fert-usage" && (
         <div className="space-y-5 px-6">
-          <PlaceholderPriceNote />
+          {/* <PlaceholderPriceNote /> */}
           <Card>
             <CardHeader
               title="Fertiliser usage"
