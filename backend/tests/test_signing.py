@@ -33,6 +33,7 @@ def _record(**overrides):
         start_date=date(2026, 8, 10),
         start_time="07:00",
         scout_report_date=date(2026, 8, 10),
+        scout_report_end_date=date(2026, 8, 10),
         recommendation_id=None,
         product="Oberon",
         active_ingredient1="Spiromesifen",

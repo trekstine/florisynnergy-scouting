@@ -60,6 +60,7 @@ async def compose_spray(
     start_date: date | None = None,
     start_time: time | None = None,
     scout_report_date: date | None = None,
+    scout_report_end_date: date | None = None,
     type_of_application: str | None = None,
     rei: str | None = None,
     # Explicit dosing, as entered on the spray sheet. When a water volume and
@@ -130,5 +131,8 @@ async def compose_spray(
         start_date=sd,
         start_time=start_time,
         scout_report_date=scout_report_date,
+        # Defaults to the start, so a single-report spray reads as a one-day
+        # window rather than as an open-ended one.
+        scout_report_end_date=scout_report_end_date or scout_report_date,
         recorded_at=recorded_at,
     )

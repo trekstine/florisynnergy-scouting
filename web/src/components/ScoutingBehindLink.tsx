@@ -17,6 +17,8 @@ export interface RoundMatch {
   nearest: RoundSummary | null;
   /** The date we were looking for, or null if the programme carries none. */
   wanted: string | null;
+  /** Every round inside the programme's own scouting window, newest first. */
+  inWindow: RoundSummary[];
 }
 
 /**
@@ -37,44 +39,61 @@ export interface RoundMatch {
 export function matchRound(
   rounds: RoundSummary[],
   reportDate: string | null,
+  reportEndDate?: string | null,
 ): RoundMatch {
-  const wanted = reportDate ? reportDate.slice(0, 10) : null;
-  if (!rounds.length) return { exact: null, nearest: null, wanted };
+  const from = reportDate ? reportDate.slice(0, 10) : null;
+  // An absent end means the window is that one day, not an open interval.
+  const to = reportEndDate ? reportEndDate.slice(0, 10) : from;
+  if (!rounds.length) return { exact: null, nearest: null, wanted: from, inWindow: [] };
 
   // No date on the programme is a gap in the record, not licence to guess.
   // Without one there is no "nearest" to speak of either — the newest round on
   // the block is not evidence for a spray of unknown date.
-  if (!wanted) return { exact: null, nearest: null, wanted: null };
+  if (!from) {
+    return { exact: null, nearest: null, wanted: null, inWindow: [] };
+  }
 
-  const onDay = rounds.filter((r) => r.started_at.slice(0, 10) === wanted);
-  if (onDay.length) {
-    // Several walks in one day: the last one is what the programme was written
-    // against, since the programme was raised after them.
-    const exact = onDay.reduce((a, b) => (a.started_at >= b.started_at ? a : b));
-    return { exact, nearest: null, wanted };
+  // Everything the programme's own window covers, newest first. A spray that
+  // answers a Monday and a Thursday walk should show both, not pick one and
+  // discard the other.
+  const inWindow = rounds
+    .filter((r) => {
+      const day = r.started_at.slice(0, 10);
+      return day >= from && day <= (to ?? from);
+    })
+    .sort((a, b) => b.started_at.localeCompare(a.started_at));
+
+  if (inWindow.length) {
+    return { exact: inWindow[0]!, nearest: null, wanted: from, inWindow };
   }
 
   const before = rounds
-    .filter((r) => r.started_at.slice(0, 10) < wanted)
+    .filter((r) => r.started_at.slice(0, 10) < from)
     .sort((a, b) => b.started_at.localeCompare(a.started_at));
-  return { exact: null, nearest: before[0] ?? null, wanted };
+  return { exact: null, nearest: before[0] ?? null, wanted: from, inWindow: [] };
 }
 
 export function ScoutingBehindLink({
   greenhouseId,
   reportDate,
+  reportEndDate,
   className = "flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline",
   label = "Scouting behind this block",
 }: {
   greenhouseId: number | null;
   reportDate: string | null;
+  /** End of the programme's scouting window, when it answers more than one walk. */
+  reportEndDate?: string | null;
   className?: string;
   label?: string;
 }) {
   const q = useRounds(
     greenhouseId != null ? { greenhouse_id: greenhouseId, limit: 100 } : null,
   );
-  const match = useMemo(() => matchRound(q.data ?? [], reportDate), [q.data, reportDate]);
+  const match = useMemo(
+    () => matchRound(q.data ?? [], reportDate, reportEndDate),
+    [q.data, reportDate, reportEndDate],
+  );
   const [open, setOpen] = useState<string | null>(null);
 
   if (greenhouseId == null) return null;
@@ -90,11 +109,30 @@ export function ScoutingBehindLink({
   };
 
   if (match.exact) {
+    const extra = match.inWindow.slice(1);
     return (
       <>
-        <button type="button" onClick={(e) => openDrawer(e, match.exact!.batch_id)} className={className}>
-          <ClipboardList size={13} /> {label}
-        </button>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <button
+            type="button"
+            onClick={(e) => openDrawer(e, match.exact!.batch_id)}
+            className={className}
+          >
+            <ClipboardList size={13} /> {label}
+          </button>
+          {/* A programme answering several walks names them all. Opening only
+              the latest would quietly drop the evidence for the rest. */}
+          {extra.map((r) => (
+            <button
+              key={r.batch_id}
+              type="button"
+              onClick={(e) => openDrawer(e, r.batch_id)}
+              className="text-xs font-semibold text-brand-700 hover:underline"
+            >
+              {formatDate(r.started_at)}
+            </button>
+          ))}
+        </span>
         <RoundDrawer batchId={open} onClose={() => setOpen(null)} />
       </>
     );

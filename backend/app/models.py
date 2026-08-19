@@ -377,7 +377,14 @@ class SprayRecord(Base):
     comments: Mapped[str | None] = mapped_column(Text)
     start_date: Mapped[date | None] = mapped_column(Date)
     start_time: Mapped[time | None] = mapped_column(Time)
+    # The scouting this application answers, as a window rather than a point.
+    # A spray commonly answers more than one walk — a block scouted Monday and
+    # Thursday and sprayed Friday — and a single date could not say so, which
+    # left the link between a programme and its evidence to be guessed at.
+    # `scout_report_date` is the start; the end is optional and equal to the
+    # start for the ordinary single-report case.
     scout_report_date: Mapped[date | None] = mapped_column(Date)
+    scout_report_end_date: Mapped[date | None] = mapped_column(Date)
 
     # ── Program lifecycle ────────────────────────────────────────────────
     # A program is planned before it is sprayed, and only reviewed once a

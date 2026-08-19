@@ -409,6 +409,7 @@ class SprayOut(BaseModel):
     start_date: date | None
     start_time: time | None = None
     scout_report_date: date | None = None
+    scout_report_end_date: date | None = None
     program_status: str = "planned"
     applied_at: datetime | None = None
     reviewed_at: datetime | None = None
@@ -637,6 +638,7 @@ class SprayProgramCreate(BaseModel):
     start_date: date | None = None
     start_time: time | None = None
     scout_report_date: date | None = None
+    scout_report_end_date: date | None = None
     recommendation_id: int | None = None
     items: list[SprayProgramItem] = Field(min_length=1)
     override: bool = False

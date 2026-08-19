@@ -58,6 +58,15 @@ def _date(value: object) -> str:
     return str(value)[:10]
 
 
+def _scouting_window(head) -> str:
+    """The scouting window, reading as a single date when it is one day."""
+    start = _date(head.scout_report_date)
+    end = _date(getattr(head, "scout_report_end_date", None))
+    if not start or start == "—":
+        return "—"
+    return start if end in ("—", start, "") else f"{start} – {end}"
+
+
 def render_approval_pdf(
     destination: Path,
     records: list["SprayRecord"],
@@ -96,7 +105,7 @@ def render_approval_pdf(
         ("Coverage", head.coverage or "—"),
         ("Water volume", head.volume_of_water or "—"),
         ("Start", f"{_date(head.start_date)} {head.start_time or ''}".strip()),
-        ("Scouting report", _date(head.scout_report_date)),
+        ("Scouting answered", _scouting_window(head)),
         ("Re-entry", f"{head.rei}h" if head.rei else "—"),
     ]
     rows = [

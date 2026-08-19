@@ -425,3 +425,64 @@ async def test_fertigation_analytics_honour_the_date_range(client, auth):
     ).json()
     assert all(r["doc_id"] != created["doc_id"] for r in rows)
     await client.delete(f"{V1}/fertigation/{created['doc_id']}", headers=auth)
+
+
+# ─────────────────── the scouting a spray answers ────────────────────────────
+async def test_spray_stores_the_scouting_window(client, auth):
+    """A programme may answer more than one walk, so the reference is a range."""
+    body = await _spray_payload(client, auth)
+    body["scout_report_date"] = "2026-08-06"
+    body["scout_report_end_date"] = "2026-08-10"
+
+    resp = await client.post(f"{V1}/spray/program", json=body, headers=auth)
+    assert resp.status_code == 201, resp.text
+    head = resp.json()["records"][0]
+    assert head["scout_report_date"] == "2026-08-06"
+    assert head["scout_report_end_date"] == "2026-08-10"
+
+
+async def test_a_single_report_reads_as_a_one_day_window(client, auth):
+    """Omitting the end must not leave an open interval.
+
+    An unbounded end would let a programme claim every round walked after it
+    was raised — scouting that had not happened when somebody decided to spray.
+    """
+    body = await _spray_payload(client, auth)
+    body["scout_report_date"] = "2026-08-06"
+    body.pop("scout_report_end_date", None)
+
+    resp = await client.post(f"{V1}/spray/program", json=body, headers=auth)
+    assert resp.status_code == 201, resp.text
+    head = resp.json()["records"][0]
+    assert head["scout_report_end_date"] == "2026-08-06"
+
+
+async def test_the_scouting_window_is_part_of_what_is_signed(client, auth):
+    """Changing the evidence under a signature must read as an alteration.
+
+    The hash covers the window; if it did not, a signed sheet's scouting
+    reference could be rewritten and the document would still verify.
+    """
+    from app.services.signing import spray_program_content
+    from types import SimpleNamespace
+    from datetime import date as _d
+
+    def rec(**over):
+        base = dict(
+            program_id="p1", greenhouse_id=7, bed_code="Bed 4", partition_no=None,
+            variety_code=None, type_of_application="Foliar", coverage="Full Cover",
+            volume_of_water="1000 L", area_ha=1.0, start_date=_d(2026, 8, 11),
+            start_time="07:00", scout_report_date=_d(2026, 8, 6),
+            scout_report_end_date=_d(2026, 8, 10), recommendation_id=None,
+            product="Oberon", active_ingredient1="Spiromesifen",
+            active_ingredient2=None, who_class="U", rac_code="23",
+            rate="50/100L", qty=1, buying_price=1.0, cost_of_chemical=1.0,
+            phi_days=3, safe_harvest_date=_d(2026, 8, 14), rei="12", comments=None,
+            target1=None, target2=None,
+        )
+        base.update(over)
+        return SimpleNamespace(**base)
+
+    before = spray_program_content([rec()])
+    after = spray_program_content([rec(scout_report_end_date=_d(2026, 8, 20))])
+    assert before != after, "the scouting window must be inside the signed content"

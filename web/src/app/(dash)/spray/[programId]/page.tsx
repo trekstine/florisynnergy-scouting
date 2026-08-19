@@ -233,8 +233,15 @@ export default function SprayProgramPage() {
               {formatDate(head.start_date ?? head.recorded_at)}
             </Detail>
             <Detail label="Start time">{head.start_time ?? "—"}</Detail>
-            <Detail label="Scouting report date">
-              {head.scout_report_date ? formatDate(head.scout_report_date) : "—"}
+            <Detail label="Scouting answered">
+              {/* A window, not a point — and it reads as one date when the
+                  programme answers a single walk, which is most of them. */}
+              {head.scout_report_date
+                ? head.scout_report_end_date &&
+                  head.scout_report_end_date !== head.scout_report_date
+                  ? `${formatDate(head.scout_report_date)} – ${formatDate(head.scout_report_end_date)}`
+                  : formatDate(head.scout_report_date)
+                : "—"}
             </Detail>
             <Detail label="Prepared by">{operator ?? "—"}</Detail>
           </dl>

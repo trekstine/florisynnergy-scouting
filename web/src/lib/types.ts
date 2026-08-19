@@ -160,6 +160,8 @@ export interface SprayRecord {
   start_date: string | null;
   start_time: string | null;
   scout_report_date: string | null;
+  /** End of the scouting window this spray answers; equals the start for one report. */
+  scout_report_end_date?: string | null;
   program_status: ProgramStatus;
   applied_at: string | null;
   reviewed_at: string | null;

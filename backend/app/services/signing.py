@@ -94,6 +94,10 @@ def spray_program_content(records: list[SprayRecord]) -> dict[str, Any]:
         "start_date": _date(head.start_date),
         "start_time": head.start_time,
         "scout_report_date": _date(head.scout_report_date),
+        # Part of what an approver signs: the evidence the programme claims.
+        # Leaving it out of the hash would let the scouting window be changed
+        # under a signature without the document reading as altered.
+        "scout_report_end_date": _date(head.scout_report_end_date),
         "recommendation_id": head.recommendation_id,
         "total_cost": _num(sum(float(r.cost_of_chemical or 0) for r in records)),
         "products": products,

@@ -24,6 +24,7 @@ import {
   useCreateSprayProgram,
   useUpdateSprayProgram,
   useGreenhouses,
+  useRounds,
   useSprayPreview,
 } from "@/lib/hooks";
 import type { ComplianceIssue, SprayPreview, SprayRecord } from "@/lib/types";
@@ -108,7 +109,11 @@ export function SprayProgramBuilder({
   const [bedCode, setBedCode] = useState(context.bedCode ?? "");
   const [partition, setPartition] = useState("");
   const [varietyCode, setVarietyCode] = useState(context.varietyCode ?? "");
+  // The scouting this application answers, as a window. A spray often answers
+  // more than one walk, and the end defaults to the start so the ordinary
+  // single-report case still reads as one day.
   const [scoutReportDate, setScoutReportDate] = useState(today);
+  const [scoutReportEnd, setScoutReportEnd] = useState("");
 
   // ── Application ──
   const [applicationType, setApplicationType] = useState(APPLICATION_TYPES[0]!);
@@ -169,6 +174,7 @@ export function SprayProgramBuilder({
       setPartition(head.partition_no ?? "");
       setVarietyCode(head.variety_code ?? "");
       setScoutReportDate(head.scout_report_date?.slice(0, 10) ?? today);
+      setScoutReportEnd(head.scout_report_end_date?.slice(0, 10) ?? "");
       setApplicationType(head.type_of_application ?? APPLICATION_TYPES[0]!);
       setCoverage(head.coverage ?? COVERAGES[0]!);
       setRei(head.rei ?? "");
@@ -190,6 +196,7 @@ export function SprayProgramBuilder({
       setPartition("");
       setVarietyCode(context.varietyCode ?? "");
       setScoutReportDate(today);
+      setScoutReportEnd("");
       setApplicationType(APPLICATION_TYPES[0]!);
       setCoverage(COVERAGES[0]!);
       setRei("");
@@ -391,6 +398,7 @@ export function SprayProgramBuilder({
       start_date: startDate,
       start_time: startTime || null,
       scout_report_date: scoutReportDate || null,
+      scout_report_end_date: scoutReportEnd || null,
       recommendation_id: context.recommendationId ?? null,
       items: items.map((i) => ({ chemical_id: i.preview.chemical_id, rate: i.rate })),
       override,
@@ -488,14 +496,33 @@ export function SprayProgramBuilder({
                 placeholder="All varieties"
               />
             </Field>
-            <Field label="Scout report date">
+            <Field label="Scouting from">
               <TextInput
                 type="date"
                 value={scoutReportDate}
+                max={scoutReportEnd || undefined}
                 onChange={(e) => setScoutReportDate(e.target.value)}
               />
             </Field>
+            <Field label="Scouting to (optional)">
+              <TextInput
+                type="date"
+                value={scoutReportEnd}
+                min={scoutReportDate || undefined}
+                onChange={(e) => setScoutReportEnd(e.target.value)}
+              />
+            </Field>
           </div>
+
+          {/* What that block and that window actually resolve to. The date was
+              typed from memory before and nothing checked it, so a programme
+              could name a day the block was never walked — and the link back
+              to "the scouting behind this spray" then had nothing to open. */}
+          <ScoutingEvidence
+            greenhouseId={greenhouseId}
+            start={scoutReportDate}
+            end={scoutReportEnd || scoutReportDate}
+          />
 
           {/* ── Application ── */}
           <SectionHeader icon={Settings2} label="Application" />
@@ -835,6 +862,114 @@ function IssueRow({ issue }: { issue: ComplianceIssue }) {
     >
       <Icon size={14} className={`mt-0.5 shrink-0 ${style.text}`} />
       <p className={`text-sm ${style.text}`}>{issue.message}</p>
+    </div>
+  );
+}
+
+/**
+ * The scouting a programme is about to claim as its justification.
+ *
+ * Before this, "Scout report date" was a bare date box that defaulted to today
+ * and was typed from memory. Nothing checked it, so a programme could name a
+ * day the block was never walked — and the link back from the spray to "the
+ * scouting behind it" then had nothing to open. Worse, it looked fine: a date
+ * is a date.
+ *
+ * So the window is resolved as it is typed and the answer is shown. Either the
+ * rounds are there, in which case the person can see the findings they are
+ * responding to, or they are not, in which case they are told before they save
+ * rather than after somebody follows the link.
+ */
+function ScoutingEvidence({
+  greenhouseId,
+  start,
+  end,
+}: {
+  greenhouseId: number | null;
+  start: string;
+  end: string;
+}) {
+  const enabled = greenhouseId != null && !!start;
+  const q = useRounds(
+    enabled ? { greenhouse_id: greenhouseId, start, end: end || start, limit: 50 } : null,
+  );
+
+  if (greenhouseId == null) {
+    return (
+      <p className="mt-2 flex items-center gap-1.5 text-xs text-ink-faint">
+        <Info size={12} /> Choose a greenhouse to see the scouting behind this
+        application.
+      </p>
+    );
+  }
+  if (!start) return null;
+  if (q.isLoading) {
+    return (
+      <p className="mt-2 text-xs text-ink-faint">Looking for scouting reports…</p>
+    );
+  }
+
+  const rounds = q.data ?? [];
+  const span = !end || end === start ? "that day" : "that window";
+
+  if (rounds.length === 0) {
+    return (
+      <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+        <span>
+          <strong>No scouting on this block in {span}.</strong> The programme can
+          still be saved — a preventative cover answers no report — but nothing
+          will open from &ldquo;scouting behind this block&rdquo;. Widen the
+          dates if you meant to point at a walk.
+        </span>
+      </div>
+    );
+  }
+
+  const findings = rounds.reduce((s, r) => s + r.findings, 0);
+  const worst = rounds.reduce((s, r) => Math.max(s, r.max_severity), 0);
+
+  return (
+    <div className="mt-2 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2">
+      <p className="text-xs font-semibold text-brand-800">
+        {rounds.length} scouting report{rounds.length === 1 ? "" : "s"} in {span}
+        {findings > 0 && (
+          <>
+            {" "}
+            · {findings} finding{findings === 1 ? "" : "s"} · worst severity{" "}
+            {worst}/5
+          </>
+        )}
+      </p>
+      <ul className="mt-1.5 space-y-1">
+        {rounds.slice(0, 5).map((r) => (
+          <li key={r.batch_id} className="flex flex-wrap items-center gap-x-2 text-[11px] text-ink-soft">
+            <span className="font-medium text-ink">
+              {new Date(r.started_at).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+              })}
+            </span>
+            <span className="text-ink-faint">{r.scout ?? "unknown scout"}</span>
+            <span className="text-ink-faint">
+              {r.findings} of {r.records} record{r.records === 1 ? "" : "s"}
+            </span>
+            {[...r.pests, ...r.diseases].slice(0, 3).map((n) => (
+              <span
+                key={n}
+                className="rounded-full bg-white px-1.5 py-0.5 font-medium text-ink-soft"
+              >
+                {n}
+              </span>
+            ))}
+          </li>
+        ))}
+        {rounds.length > 5 && (
+          <li className="text-[11px] text-ink-faint">
+            …and {rounds.length - 5} more
+          </li>
+        )}
+      </ul>
     </div>
   );
 }

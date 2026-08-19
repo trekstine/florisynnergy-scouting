@@ -284,6 +284,7 @@ async def _build_program(
             start_date=payload.start_date,
             start_time=payload.start_time,
             scout_report_date=payload.scout_report_date,
+            scout_report_end_date=payload.scout_report_end_date,
             recommendation_id=payload.recommendation_id,
             client_record_id=str(uuid.uuid4()),
             program_id=program_id,

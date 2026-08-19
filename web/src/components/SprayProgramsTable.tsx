@@ -374,6 +374,7 @@ function ProgramDetail({
         <ScoutingBehindLink
           greenhouseId={head.greenhouse_id}
           reportDate={head.scout_report_date ?? head.start_date}
+          reportEndDate={head.scout_report_end_date}
           className="flex items-center gap-1 font-semibold text-brand-700 hover:underline"
         />
         {head.comments && (

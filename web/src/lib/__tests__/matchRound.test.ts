@@ -70,4 +70,45 @@ describe("matchRound", () => {
     expect(m.exact).toBeNull();
     expect(m.nearest).toBeNull();
   });
+
+  // ── the window, not the point ──────────────────────────────────────────
+  it("returns every round inside the programme's own window", () => {
+    // A spray raised on 11 Aug answering the walks of 6 and 10 Aug. Both are
+    // its evidence; showing only one would drop half the justification.
+    const m = matchRound(ROUNDS, "2026-08-06", "2026-08-10");
+    expect(m.inWindow.map((r) => r.started_at)).toEqual([
+      "2026-08-10T07:15:00Z",
+      "2026-08-06T14:51:00Z",
+    ]);
+    // The newest in the window is what opens first.
+    expect(m.exact?.started_at).toBe("2026-08-10T07:15:00Z");
+    expect(m.nearest).toBeNull();
+  });
+
+  it("treats a missing end as a single day, not an open interval", () => {
+    // Without this, one absent end date would sweep in every later round and
+    // the programme would claim scouting that had not happened when it was
+    // raised.
+    const m = matchRound(ROUNDS, "2026-07-29");
+    expect(m.inWindow).toHaveLength(1);
+    expect(m.exact?.started_at).toBe("2026-07-29T08:00:00Z");
+  });
+
+  it("includes both ends of the window", () => {
+    const m = matchRound(ROUNDS, "2026-07-22", "2026-07-29");
+    expect(m.inWindow).toHaveLength(2);
+  });
+
+  it("falls back to the nearest earlier round when the window is empty", () => {
+    const m = matchRound(ROUNDS, "2026-08-01", "2026-08-04");
+    expect(m.inWindow).toHaveLength(0);
+    expect(m.exact).toBeNull();
+    expect(m.nearest?.started_at).toBe("2026-07-29T08:00:00Z");
+  });
+
+  it("does not reach past the end of the window", () => {
+    // 10 Aug sits outside a window closing on the 6th.
+    const m = matchRound(ROUNDS, "2026-08-06", "2026-08-06");
+    expect(m.inWindow.map((r) => r.started_at)).toEqual(["2026-08-06T14:51:00Z"]);
+  });
 });
