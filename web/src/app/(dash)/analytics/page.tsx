@@ -1729,7 +1729,7 @@ export default function AnalyticsPage() {
           <Card>
             <CardHeader
               title="Water applied against plan"
-              subtitle="Each sheet's m³/ha next to the target it was raised for. Negative variance is underfeeding."
+              subtitle="Each sheet's m³/ha against that phase's own average. Negative means lighter than usual."
             />
             <div className="overflow-auto p-4">
               {fertWater.isLoading && <Spinner />}
@@ -1746,8 +1746,8 @@ export default function AnalyticsPage() {
                       <th className="py-2 pr-3 text-right font-semibold">Area ha</th>
                       <th className="py-2 pr-3 text-right font-semibold">Water m³</th>
                       <th className="py-2 pr-3 text-right font-semibold">m³/ha</th>
-                      <th className="py-2 pr-3 text-right font-semibold">Target m³/ha</th>
-                      <th className="py-2 pr-3 text-right font-semibold">Variance</th>
+                      <th className="py-2 pr-3 text-right font-semibold">Phase avg m³/ha</th>
+                      <th className="py-2 pr-3 text-right font-semibold">vs usual</th>
                       <th className="py-2 text-right font-semibold">Cost</th>
                     </tr>
                   </thead>
@@ -1778,11 +1778,11 @@ export default function AnalyticsPage() {
                           {r.m3_per_ha ?? "—"}
                         </td>
                         <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">
-                          {r.target_m3_per_ha ?? "—"}
+                          {r.phase_avg_m3_per_ha ?? "—"}
                         </td>
                         <td className="py-2 pr-3 text-right tabular-nums">
                           {r.variance_pct == null ? (
-                            <span className="text-ink-faint">no target set</span>
+                            <span className="text-ink-faint">only sheet on this phase</span>
                           ) : (
                             <span
                               className={clsx(
@@ -1806,9 +1806,11 @@ export default function AnalyticsPage() {
                 </table>
               )}
               <p className="mt-3 border-t border-line pt-3 text-xs text-ink-faint">
-                A sheet with no target rate has nothing to be measured against,
-                so its variance is blank rather than zero — a blank is missing
-                information, and zero would read as on-plan.
+                The rate is the water divided by the area fed, so a sheet cannot
+                differ from its own plan. What is compared here is each feed
+                against that phase&apos;s own average over the range — a block fed
+                heavier or lighter than usual. A phase with one sheet in range
+                has no usual, so its variance is blank rather than zero.
               </p>
             </div>
           </Card>

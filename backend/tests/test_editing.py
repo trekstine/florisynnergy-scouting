@@ -369,31 +369,97 @@ async def test_fertigation_cost_by_block_does_not_multiply_the_bill(client, auth
     await client.delete(f"{V1}/fertigation/{doc_id}", headers=auth)
 
 
-async def test_fertigation_water_reports_variance_against_target(client, auth):
+async def test_the_rate_is_derived_from_the_water_not_typed(client, auth):
+    """m³/ha is an outcome of the volume, never a second editable figure.
+
+    Two editable numbers describing one fact is how a sheet ends up disagreeing
+    with itself. The client asked for the water to be entered and the rate to
+    follow from it, so a target sent by a caller must be ignored rather than
+    stored.
+    """
     body = await _fertigation_payload(client, auth)
-    body["target_m3_per_ha"] = 30
-    body["area_ha"] = 40          # 1000 m³ over 40 ha is 25 m³/ha
+    body["area_ha"] = 40            # 1000 m³ over 40 ha is 25 m³/ha
+    body["target_m3_per_ha"] = 999  # a caller insisting otherwise
+
+    resp = await client.post(f"{V1}/fertigation", json=body, headers=auth)
+    assert resp.status_code == 201, resp.text
+    out = resp.json()
+    assert out["m3_per_ha"] == 25.0
+    assert out["target_m3_per_ha"] == 25.0, "the typed figure must not survive"
+
+    await client.delete(f"{V1}/fertigation/{out['doc_id']}", headers=auth)
+
+
+async def test_the_rate_follows_the_water_when_it_is_corrected(client, auth):
+    """Halve the volume and the rate halves with it, without anyone retyping."""
+    created = await _create_fertigation(client, auth, area_ha=40)
+    assert created["target_m3_per_ha"] == 25.0
+
+    body = await _fertigation_payload(client, auth)
+    body["area_ha"] = 40
+    body["volume_m3"] = 500
+    resp = await client.put(
+        f"{V1}/fertigation/{created['doc_id']}", json=body, headers=auth
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["target_m3_per_ha"] == 12.5
+
+    await client.delete(f"{V1}/fertigation/{created['doc_id']}", headers=auth)
+
+
+async def test_water_variance_compares_against_the_phase_average(client, auth):
+    """Heavier or lighter than usual for that block — the useful question.
+
+    With the rate derived, a sheet cannot differ from its own target, so the
+    comparison is against the phase's own mean over the range.
+    """
+    made = []
+    for volume in (800, 1000, 1200):  # 20, 25 and 30 m³/ha over 40 ha
+        body = await _fertigation_payload(client, auth)
+        body["area_ha"] = 40
+        body["volume_m3"] = volume
+        body["phase"] = "Variance Test Phase"
+        resp = await client.post(f"{V1}/fertigation", json=body, headers=auth)
+        assert resp.status_code == 201, resp.text
+        made.append(resp.json()["doc_id"])
+
+    rows = (await client.get(f"{V1}/analytics/fertigation/water", headers=auth)).json()
+    mine = {r["doc_id"]: r for r in rows if r["doc_id"] in made}
+    assert len(mine) == 3
+
+    rates = sorted(r["m3_per_ha"] for r in mine.values())
+    assert rates == [20.0, 25.0, 30.0]
+
+    # Mean of 20, 25, 30 is 25. The lightest is 20% under, the heaviest 20% over.
+    by_rate = {r["m3_per_ha"]: r for r in mine.values()}
+    assert by_rate[25.0]["phase_avg_m3_per_ha"] == 25.0
+    assert by_rate[20.0]["variance_pct"] == pytest.approx(-20.0, abs=0.1)
+    assert by_rate[30.0]["variance_pct"] == pytest.approx(20.0, abs=0.1)
+    assert by_rate[25.0]["variance_pct"] == pytest.approx(0.0, abs=0.1)
+
+    for doc_id in made:
+        await client.delete(f"{V1}/fertigation/{doc_id}", headers=auth)
+
+
+async def test_a_phase_with_one_sheet_has_no_variance(client, auth):
+    """No 'usual' to compare against is an absence of evidence, not agreement.
+
+    Reporting 0% here would read as "exactly on plan" when the truth is that
+    there is nothing to be on plan against.
+    """
+    body = await _fertigation_payload(client, auth)
+    body["area_ha"] = 40
+    body["phase"] = f"Lonely Phase {uuid.uuid4().hex[:6]}"
     resp = await client.post(f"{V1}/fertigation", json=body, headers=auth)
     assert resp.status_code == 201, resp.text
     doc_id = resp.json()["doc_id"]
 
     rows = (await client.get(f"{V1}/analytics/fertigation/water", headers=auth)).json()
     mine = next(r for r in rows if r["doc_id"] == doc_id)
-    assert mine["m3_per_ha"] == 25.0
-    assert mine["target_m3_per_ha"] == 30.0
-    # 25 against 30 is 16.7% short — underfeeding, and it must read negative.
-    assert mine["variance_pct"] == pytest.approx(-16.7, abs=0.1)
+    assert mine["variance_pct"] is None
+    assert mine["phase_avg_m3_per_ha"] is None
 
     await client.delete(f"{V1}/fertigation/{doc_id}", headers=auth)
-
-
-async def test_fertigation_water_leaves_variance_blank_without_a_target(client, auth):
-    """No target is missing information, not agreement with the plan."""
-    created = await _create_fertigation(client, auth)  # no target_m3_per_ha
-    rows = (await client.get(f"{V1}/analytics/fertigation/water", headers=auth)).json()
-    mine = next(r for r in rows if r["doc_id"] == created["doc_id"])
-    assert mine["variance_pct"] is None
-    await client.delete(f"{V1}/fertigation/{created['doc_id']}", headers=auth)
 
 
 async def test_fertigation_usage_counts_sets_not_just_line_quantity(client, auth):

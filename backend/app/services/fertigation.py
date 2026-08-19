@@ -1,18 +1,40 @@
 """The arithmetic on a fertigation sheet.
 
-All of it derives from one number — cubic metres of irrigation water — through
-rates the farm sets. Kept in one place so the builder, the list, the document
-and any later report cannot drift apart on what a figure means.
+All of it derives from one measured number — the cubic metres of water that
+went on, taken from the phase meter readings before and after — through rates
+the farm sets. Kept in one place so the builder, the list, the document and any
+later report cannot drift apart on what a figure means.
 
-From the source report:
+What the Fertigation Report actually fixes, and what it merely illustrates,
+matters here and is easy to get backwards:
 
-    1 set = 1,000 L · fertiliser injection 6 L/m³ · acid injection 2 L/m³
-    6 sets = 6,000 L over ~30 ha → 200 L/ha → 200 ÷ 6 ≈ 33.33 m³/ha
+**Fixed by the regime**
+
+    Sarai valves inject 6 L of fertiliser stock and 2 L of acid per m³ of water.
+    A set is one make-up of a tank: Tanks A and B hold 1,000 L, Tank C 500 L.
+    Each tank's recipe is written per its own volume — 132 kg CaNO₃ per 1,000 L
+    of Tank A, 24 kg H₂SO₄ per 500 L of Tank C.
+
+**Worked examples, not constants**
+
+    The report walks through one day: 6 sets = 6,000 L of stock, over roughly
+    30 ha, giving 200 L/ha, which at 6 L/m³ is about 33.33 m³/ha. Every figure
+    in that sentence is an illustration. The report says so plainly a page
+    later — "there is no predefined number of sets (this is the volume used,
+    can be 5 or 6)" — and the areas differ between the two source documents
+    anyway. So 33.33 is never a target and never a default; it is simply what
+    that day's water came to per hectare, and it changes every time.
+
+The direction of the calculation is therefore:
+
+    water m³ (metered)  →  stock L = m³ × 6  →  sets = stock L ÷ tank volume
+                        →  issue per fertiliser = recipe × sets
+                        →  m³/ha = water ÷ area fed
 
 Rates and tank volumes are configurable and stored on each record, because the
-supplied documents already disagree with each other — 132 kg of CaNO3 in the
-report against 145 kg in the printed regime, 30 ha against 32 ha. A sheet has
-to keep saying what it said when it was signed.
+supplied documents already disagree with each other — 132 kg of CaNO₃ in the
+report against 145 kg in the printed regime. A sheet has to keep saying what it
+said when it was signed.
 """
 from __future__ import annotations
 
@@ -121,8 +143,10 @@ def source_mismatch(volume_m3: float | None, sources: Iterable) -> str | None:
     """Does the source breakdown add up to the water that went on?
 
     Not an error — a farm may record only the borehole and leave the rest — but
-    a silent difference between "835 m³ applied" and sources totalling 500 is
-    exactly the sort of thing nobody notices until an audit.
+    a silent difference between the water applied and the sources it was drawn
+    from is exactly the sort of thing nobody notices until an audit. The report
+    asks for river, borehole and reservoir-to-field to be recorded each day, so
+    the two ought to agree.
     """
     listed = list(sources)
     if not volume_m3 or not listed:
@@ -150,15 +174,25 @@ def selected_area_ha(blocks: Iterable) -> float:
     return round(total, 4)
 
 
-def planned_m3(target_m3_per_ha: float | None, area_ha: float) -> float | None:
-    """BR-002/003 — plan the water from the area rather than measure it after.
+def applied_rate_m3_per_ha(volume_m3: float | None, area_ha: float | None) -> float | None:
+    """The rate the water actually came to, over the area it covered.
 
-    Straight from the source report: "m³ used = 33.33 × (Greenhouse Area in
-    ha)", summed over the blocks fed.
+    This is the figure the report illustrates as "≈ 33.33 m³/ha". It is an
+    outcome, not a target: the farm meters the water that went on and this is
+    what it works out to per hectare, so it differs from day to day and from
+    phase to phase. Nothing should default to it or measure against it.
+
+    It replaces a typed field. Two editable numbers describing one fact is how
+    a sheet ends up disagreeing with itself — the same fault the set count had,
+    where a typed 1 sat beside a derived 6 and the costing followed the wrong
+    one.
+
+    Derived at write time and stored on the record, so a signed sheet keeps
+    saying what it said even if a block is later re-measured.
     """
-    if not target_m3_per_ha or area_ha <= 0:
+    if not volume_m3 or not area_ha or area_ha <= 0:
         return None
-    return round(target_m3_per_ha * area_ha, 2)
+    return round(volume_m3 / area_ha, 2)
 
 
 def blocks_total_m3(blocks: Iterable) -> float:

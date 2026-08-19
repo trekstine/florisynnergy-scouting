@@ -39,6 +39,7 @@ import type {
   SeverityBucket,
   SprayAttachment,
   FertigationCostRow,
+  FertigationTank,
   FertigationUsageRow,
   FertigationWaterRow,
   SprayCostRow,
@@ -579,6 +580,19 @@ function fertQS(f: Filters, extra: Record<string, string | undefined> = {}): str
   const qs = p.toString();
   return qs ? `?${qs}` : "";
 }
+
+/**
+ * The farm's standard tank make-up, resolved against the register.
+ *
+ * Quantities are per tank-full; the number of tank-fulls comes from the day's
+ * water. The regime fixes the recipe, never the set count.
+ */
+export const useFertigationRegime = () =>
+  useQuery({
+    queryKey: ["fert-regime"],
+    queryFn: () => api.get<FertigationTank[]>(`${V1}/fertigation/regime`),
+    staleTime: 5 * 60_000,
+  });
 
 export const useFertigationCost = (group: string, f: Filters = {}) =>
   useQuery({

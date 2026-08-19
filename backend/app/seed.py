@@ -163,13 +163,16 @@ FERTILISERS = [
     # From the Fertigation Report's Tank A composition. Superlink is dosed in
     # litres, which is why the register carries a unit per item rather than
     # assuming kilograms.
-    ("FE",       "Iron chelate (EDDHA)",     "Fe-EDDHA", "B", False, 0,    0,    0,    0,    0,    0,    1450.0),
+    ("FE",       "Iron chelate (EDDHA)",     "Fe-EDDHA", "A", False, 0,    0,    0,    0,    0,    0,    1450.0),
     ("VERMICOMPOST", "Vermicompost",         None,       None, False, 1.5, 0.5,  1.0,  0,    0,    0,    35.0),
-    ("SUPERLINK", "Superlink",               None,       "B", False, 0,    0,    0,    0,    0,    0,    900.0),
+    ("SUPERLINK", "Superlink",               None,       "A", False, 0,    0,    0,    0,    0,    0,    900.0),
 ]
 
 # Items dosed by volume rather than weight.
-LITRE_ITEMS = {"SUPERLINK", "H2SO4", "H3PO4"}
+# Superlink is the one item the report doses by volume ("1 litre"). Both acids
+# are given in kilograms there — 24 kg H2SO4, 5.8 kg H2PO4 — so they are weighed
+# out like everything else and must not be assumed to be litres.
+LITRE_ITEMS = {"SUPERLINK"}
 # Organic feeds, whose rate follows the weather rather than the regime.
 ORGANIC_ITEMS = {"VERMICOMPOST"}
 

@@ -87,7 +87,11 @@ export default function FertigationDocPage() {
           <Kv label="Type of application" value={f.type_of_application ?? "—"} />
           <Kv
             label="Total water applied"
-            value={f.volume_m3 != null ? `${f.volume_m3} m³` : "—"}
+            value={
+              f.volume_m3 != null
+                ? `${Math.round(f.volume_m3 * 1000).toLocaleString()} L (${f.volume_m3} m³)`
+                : "—"
+            }
             strong
           />
           <Kv
@@ -100,8 +104,8 @@ export default function FertigationDocPage() {
           />
           <Kv label="m³ per ha" value={f.m3_per_ha != null ? String(f.m3_per_ha) : "—"} />
           <Kv label="Applicator" value={f.applicator ?? "—"} />
-          {f.target_m3_per_ha != null && (
-            <Kv label="Target rate" value={`${f.target_m3_per_ha} m³/ha`} />
+          {f.m3_per_ha != null && (
+            <Kv label="Rate applied" value={`${f.m3_per_ha} m³/ha`} />
           )}
           {f.weather && <Kv label="Weather" value={f.weather} />}
         </div>
@@ -117,14 +121,10 @@ export default function FertigationDocPage() {
             <Kv label="Acid injection" value={`${f.acid_rate_l_m3} L per m³`} />
             <Kv label="Acid solution" value={`${f.acid_required_l} L`} strong />
           </div>
-          {f.planned_m3 != null && (
+          {f.m3_per_ha != null && (
             <p className="mt-2 text-[10px] text-ink-faint">
-              Planned: {f.target_m3_per_ha} m³/ha × {f.area_ha} ha ={" "}
-              {f.planned_m3} m³
-              {f.volume_m3 != null &&
-                Math.abs(f.planned_m3 - f.volume_m3) >= 0.5 &&
-                ` · ${f.volume_m3} m³ actually applied`}
-              .
+              Rate applied: {Math.round((f.volume_m3 ?? 0) * 1000).toLocaleString()} L
+              = {f.volume_m3} m³ ÷ {f.area_ha} ha = {f.m3_per_ha} m³/ha.
             </p>
           )}
           {f.volume_m3 != null && (

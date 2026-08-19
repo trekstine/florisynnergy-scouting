@@ -108,7 +108,18 @@ export default function FertigationDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 px-6 lg:grid-cols-5">
-        <Tile icon={<Droplets size={13} />} label="Water" value={`${f.volume_m3 ?? "—"} m³`} />
+        {/* Litres is what the meter reads and what the operator writes down;
+            m³ is what every rate on the sheet is expressed against. Both. */}
+        <Tile
+          icon={<Droplets size={13} />}
+          label="Water"
+          value={
+            f.volume_m3 != null
+              ? `${Math.round(f.volume_m3 * 1000).toLocaleString()} L`
+              : "—"
+          }
+          hint={f.volume_m3 != null ? `${f.volume_m3.toLocaleString()} m³` : undefined}
+        />
         <Tile label="Area fed" value={f.area_ha != null ? `${f.area_ha} ha` : "—"} />
         <Tile label="m³ / ha" value={f.m3_per_ha != null ? String(f.m3_per_ha) : "—"} />
         <Tile icon={<Beaker size={13} />} label="Stock" value={`${f.stock_required_l} L`} />
@@ -137,11 +148,8 @@ export default function FertigationDetailPage() {
             <Detail label="Start time">{f.start_time ?? "—"}</Detail>
             <Detail label="Phase">{f.phase ?? "—"}</Detail>
             <Detail label="Applicator">{f.applicator ?? "—"}</Detail>
-            <Detail label="Target rate">
-              {f.target_m3_per_ha != null ? `${f.target_m3_per_ha} m³/ha` : "—"}
-            </Detail>
-            <Detail label="Planned water">
-              {f.planned_m3 != null ? `${f.planned_m3} m³` : "—"}
+            <Detail label="Rate applied">
+              {f.m3_per_ha != null ? `${f.m3_per_ha} m³/ha` : "—"}
             </Detail>
             <Detail label="Fertiliser injection">{f.fertiliser_rate_l_m3} L/m³</Detail>
             <Detail label="Acid injection">{f.acid_rate_l_m3} L/m³</Detail>
@@ -322,10 +330,13 @@ function Tile({
   icon,
   label,
   value,
+  hint,
 }: {
   icon?: React.ReactNode;
   label: string;
   value: string;
+  /** The same figure in the other unit, where a farm uses both. */
+  hint?: string;
 }) {
   return (
     <Card className="p-4">
@@ -334,6 +345,7 @@ function Tile({
         {label}
       </p>
       <p className="mt-1.5 text-xl font-bold tabular-nums text-ink">{value}</p>
+      {hint && <p className="text-xs tabular-nums text-ink-faint">{hint}</p>}
     </Card>
   );
 }

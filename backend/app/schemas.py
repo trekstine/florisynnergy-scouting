@@ -1276,8 +1276,6 @@ class FertigationIn(BaseModel):
     type_of_application: str | None = Field(default=None, max_length=60)
     volume_m3: float | None = None
     area_ha: float | None = None
-    # Plan the water instead of measuring it: m³ = target × summed block area.
-    target_m3_per_ha: float | None = None
     weather: str | None = Field(default=None, max_length=80)
     fertiliser_rate_l_m3: float = 6.0
     acid_rate_l_m3: float = 2.0
@@ -1337,7 +1335,6 @@ class FertigationOut(BaseModel):
     block_note: str | None = None
     # What the target rate calls for over the blocks selected — the report's
     # "m³ used = 33.33 × greenhouse area", summed.
-    planned_m3: float | None = None
     signature_count: int = 0
 
 
@@ -1371,11 +1368,16 @@ class FertigationUsageRow(BaseModel):
 
 
 class FertigationWaterRow(BaseModel):
-    """Water applied against the rate that was planned, per sheet.
+    """Water applied per sheet, against how that phase is usually fed.
 
-    ``target_m3_per_ha`` is what the sheet asked for and ``m3_per_ha`` what the
-    volume and area actually work out to. The gap between them is the point of
-    the row — a phase consistently under its target is a phase being underfed.
+    The rate is no longer a figure somebody types alongside the volume — it is
+    what the volume comes to over the area — so a sheet can never disagree with
+    itself, and there is nothing to measure it against on its own row.
+
+    What is worth knowing is whether *this* feed was heavier or lighter than
+    normal for the block it went on, so the comparison is against the phase's
+    own mean over the range. `variance_pct` is that difference: +18 means this
+    sheet put on 18% more water per hectare than the phase's usual.
     """
 
     doc_id: str
@@ -1386,7 +1388,7 @@ class FertigationWaterRow(BaseModel):
     area_ha: float | None = None
     volume_m3: float | None = None
     m3_per_ha: float | None = None
-    target_m3_per_ha: float | None = None
+    phase_avg_m3_per_ha: float | None = None
     variance_pct: float | None = None
     total_cost: float
     status: str

@@ -8,6 +8,7 @@ import { money } from "@/lib/format";
 import {
   useEmployees,
   useFertilisers,
+  useFertigationRegime,
   useGreenhouses,
   usePhases,
   useSaveFertigation,
@@ -28,6 +29,21 @@ const ACTIVITIES: { id: FertActivity; label: string }[] = [
 
 const SOURCES = ["Borehole", "River", "Reservoir", "Mix"];
 const APPLICATION_TYPES = ["Drip", "Drench", "Overhead", "Flush"];
+
+/**
+ * Litres in, cubic metres on the record.
+ *
+ * Rounded to two decimals of a cubic metre — ten litres — because a float
+ * division leaves 835000/1000 as 834.9999999999999 often enough to show up in
+ * a total and look like a fault.
+ */
+function lToM3(litres: number): number {
+  return Math.round((litres / 1000) * 100) / 100;
+}
+
+function m3ToL(m3: number): number {
+  return Math.round(m3 * 1000);
+}
 
 function defaultTanks(): FertigationTank[] {
   return [
@@ -63,6 +79,7 @@ export function FertigationBuilder({
   const employees = useEmployees();
   const fertilisers = useFertilisers();
   const phases = usePhases();
+  const regime = useFertigationRegime();
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -74,9 +91,13 @@ export function FertigationBuilder({
   const [blockVolumes, setBlockVolumes] = useState<Record<number, string>>({});
   const [perBlock, setPerBlock] = useState(false);
   const [applicationType, setApplicationType] = useState(APPLICATION_TYPES[0]!);
-  const [volume, setVolume] = useState("");
+  // Held in litres, because that is what the meter reads and what the
+  // operator writes down. The record keeps cubic metres: every rate on the
+  // sheet is defined per m³ — 6 L/m³ injection, 33.33 m³/ha — and every sheet
+  // already signed holds m³, so reinterpreting the stored figure as litres
+  // would multiply the farm's history by a thousand.
+  const [volumeL, setVolumeL] = useState("");
   const [area, setArea] = useState("");
-  const [target, setTarget] = useState("");
   const [weather, setWeather] = useState("");
   const [fertRate, setFertRate] = useState("6");
   const [acidRate, setAcidRate] = useState("2");
@@ -108,9 +129,8 @@ export function FertigationBuilder({
       setBlockVolumes(vols);
       setPerBlock(Object.keys(vols).length > 0);
       setApplicationType(editing.type_of_application ?? APPLICATION_TYPES[0]!);
-      setVolume(editing.volume_m3 != null ? String(editing.volume_m3) : "");
+      setVolumeL(editing.volume_m3 != null ? String(m3ToL(editing.volume_m3)) : "");
       setArea(editing.area_ha != null ? String(editing.area_ha) : "");
-      setTarget(editing.target_m3_per_ha != null ? String(editing.target_m3_per_ha) : "");
       setWeather(editing.weather ?? "");
       setFertRate(String(editing.fertiliser_rate_l_m3));
       setAcidRate(String(editing.acid_rate_l_m3));
@@ -127,9 +147,8 @@ export function FertigationBuilder({
       setBlockVolumes({});
       setPerBlock(false);
       setApplicationType(APPLICATION_TYPES[0]!);
-      setVolume("");
+      setVolumeL("");
       setArea("");
-      setTarget("");
       setWeather("");
       setFertRate("6");
       setAcidRate("2");
@@ -162,7 +181,9 @@ export function FertigationBuilder({
     [allHouses, blockIds],
   );
 
-  const volumeNum = Number(volume) || 0;
+  // One conversion point, so nothing downstream has to remember which unit it
+  // is holding.
+  const volumeNum = lToM3(Number(volumeL) || 0);
   const areaNum = Number(area) || selectedArea || 0;
   const fertRateNum = Number(fertRate) || 0;
   const acidRateNum = Number(acidRate) || 0;
@@ -189,10 +210,6 @@ export function FertigationBuilder({
         s + t.lines.reduce((ls, l) => ls + (l.unit_price ?? 0) * l.quantity * sets(t), 0),
       0,
     );
-    const planned =
-      Number(target) > 0 && areaNum > 0
-        ? Math.round(Number(target) * areaNum * 100) / 100
-        : null;
     const srcTotal =
       Math.round(sources.reduce((s, x) => s + (x.volume_m3 ?? 0), 0) * 100) / 100;
 
@@ -204,14 +221,13 @@ export function FertigationBuilder({
       sets,
       cost: Math.round(cost * 100) / 100,
       perHa: areaNum ? Math.round((volumeNum / areaNum) * 100) / 100 : null,
-      planned,
       srcTotal,
       srcGap:
         volumeNum > 0 && srcTotal > 0 && Math.abs(srcTotal - volumeNum) >= 0.5
           ? Math.round((srcTotal - volumeNum) * 100) / 100
           : null,
     };
-  }, [volumeNum, areaNum, fertRateNum, acidRateNum, tanks, sources, target]);
+  }, [volumeNum, areaNum, fertRateNum, acidRateNum, tanks, sources]);
 
   const warnings = useMemo(() => {
     const out: string[] = [];
@@ -283,7 +299,6 @@ export function FertigationBuilder({
       type_of_application: applicationType,
       volume_m3: volumeNum || null,
       area_ha: area ? Number(area) : null,
-      target_m3_per_ha: target ? Number(target) : null,
       weather: weather || null,
       fertiliser_rate_l_m3: fertRateNum,
       acid_rate_l_m3: acidRateNum,
@@ -458,25 +473,39 @@ export function FertigationBuilder({
           {/* ── 2. Water — needs the area from step 1 ── */}
           <Step n={2} title="Water">
             <div className="grid gap-3 sm:grid-cols-4">
-              <Field label="Target m³/ha">
+              <Field label="Water applied (litres)">
                 <TextInput
                   type="number"
                   min={0}
-                  step="0.01"
-                  value={target}
-                  onChange={(e) => setTarget(e.target.value)}
-                  placeholder="33.33"
+                  step="1"
+                  value={volumeL}
+                  onChange={(e) => setVolumeL(e.target.value)}
+                  placeholder="835000"
                 />
               </Field>
-              <Field label="Water applied (m³)">
-                <TextInput
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={volume}
-                  onChange={(e) => setVolume(e.target.value)}
-                  placeholder={d.planned ? String(d.planned) : "835"}
-                />
+              <Field label="= m³">
+                <div className="flex h-[38px] items-center rounded-lg border border-line bg-surface px-3 text-sm font-semibold tabular-nums text-ink">
+                  {volumeNum > 0 ? (
+                    volumeNum.toLocaleString()
+                  ) : (
+                    <span className="text-xs font-normal text-ink-faint">—</span>
+                  )}
+                </div>
+              </Field>
+              {/* Read-only, and derived. It was an editable field beside the
+                  volume, which let a sheet state a rate its own figures did
+                  not support — the same fault the set count had. The water is
+                  measured; the rate is what that comes to. */}
+              <Field label="m³/ha (from the water)">
+                <div className="flex h-[38px] items-center rounded-lg border border-line bg-surface px-3 text-sm font-semibold tabular-nums text-ink">
+                  {d.perHa != null ? (
+                    d.perHa
+                  ) : (
+                    <span className="text-xs font-normal text-ink-faint">
+                      {areaNum > 0 ? "enter the water" : "select blocks first"}
+                    </span>
+                  )}
+                </div>
               </Field>
               <Field label="Area (ha)">
                 <TextInput
@@ -502,19 +531,10 @@ export function FertigationBuilder({
               </Field>
             </div>
 
-            {d.planned != null && (
-              <Note tone={volumeNum && Math.abs(d.planned - volumeNum) >= 0.5 ? "warn" : "flat"}>
-                {target} × {areaNum} ha = <strong>{d.planned} m³</strong>
-                {volumeNum > 0 && Math.abs(d.planned - volumeNum) >= 0.5 && (
-                  <> · {volumeNum} recorded</>
-                )}{" "}
-                <button
-                  type="button"
-                  onClick={() => setVolume(String(d.planned))}
-                  className="font-semibold underline"
-                >
-                  use
-                </button>
+            {d.perHa != null && (
+              <Note tone="flat">
+                {Number(volumeL).toLocaleString()} L = {volumeNum.toLocaleString()} m³ ÷{" "}
+                {areaNum} ha = <strong>{d.perHa} m³/ha</strong>
               </Note>
             )}
 
@@ -671,6 +691,30 @@ export function FertigationBuilder({
 
           {/* ── 3. Tanks — sets derive from the water in step 2 ── */}
           <Step n={3} title="Stock tanks">
+            {/* The regime is the fixed part of the report — the quantity of
+                each salt per tank-full. Fifteen lines retyped every morning is
+                how a wrong weight reaches the store, so it loads in one press.
+                The set count is not loaded with it: that comes from the day's
+                water, and the report is explicit that it is not predefined. */}
+            {regime.data && regime.data.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2">
+                <Beaker size={14} className="shrink-0 text-brand-700" />
+                <span className="min-w-0 flex-1 text-xs text-ink-soft">
+                  Load the farm&apos;s standard make-up —{" "}
+                  {regime.data.map((t) => `Tank ${t.code} (${t.lines.length})`).join(", ")}.
+                  Quantities are per tank-full; the number of tank-fulls comes
+                  from the water.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTanks(regime.data!.map((t) => ({ ...t })))}
+                  className="shrink-0 rounded-lg border border-brand-300 bg-white px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                >
+                  {tanks.some((t) => t.lines.length > 0) ? "Replace with regime" : "Load regime"}
+                </button>
+              </div>
+            )}
+
             {warnings.map((w) => (
               <Note key={w} tone="warn">
                 <AlertTriangle size={12} className="inline" /> {w}

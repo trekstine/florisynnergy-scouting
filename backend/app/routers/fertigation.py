@@ -5,13 +5,18 @@ went on it, and what was made up in each stock tank. It signs through the same
 approval slots a spray does, as ``document_type = "fertigation"``.
 
 Deliberately narrower than the full functional specification: no proposals, no
-stores issue and return, no meter readings. Those need answers the farm has not
-given yet — what the daily per-greenhouse figures actually measure, whether
-Tank C scales with the A/B set count — and building on a guess would be worse
-than waiting.
+stores issue and return, no meter readings. Those want answers the farm has not
+given yet, and building on a guess would be worse than waiting.
+
+One earlier open question is now settled by the Fertigation Report: Tank C does
+*not* scale with the A/B set count. Each tank's recipe is written per its own
+made-up volume — 1,000 L for A and B, 500 L for C — so a day calling for 6,000 L
+of fertiliser stock and 2,000 L of acid is six make-ups of A and B and four of
+C. That is what the code derives.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date, datetime, timezone
 
@@ -36,9 +41,11 @@ from ..models import (
 from ..schemas import (
     FertigationBlockOut,
     FertigationIn,
+    FertigationLineIn,
     FertigationLineOut,
     FertigationOut,
     FertigationSourceOut,
+    FertigationTankIn,
     FertigationTankOut,
     FertiliserIn,
     FertiliserOut,
@@ -48,6 +55,8 @@ from ..schemas import (
 from ..services import fertigation as calc
 
 router = APIRouter(prefix="/fertigation", tags=["fertigation"])
+
+log = logging.getLogger("uvicorn.error")
 
 DOC_TYPE = "fertigation"
 
@@ -99,6 +108,65 @@ async def update_fertiliser(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+@router.get("/regime", response_model=list[FertigationTankIn])
+async def standard_regime(
+    db: AsyncSession = Depends(get_db),
+    _: Employee = Depends(get_current_employee),
+):
+    """The farm's standard tank make-up, ready to drop into a new sheet.
+
+    Returned resolved against the register, so the builder gets fertiliser ids
+    and units rather than codes it would have to match itself. Anything in the
+    regime that is not in the register is skipped rather than sent as a line
+    pointing at nothing.
+
+    Quantities are per tank-full. The number of tank-fulls is derived from the
+    day's water — the regime fixes the recipe, never the set count.
+    """
+    from ..fertigation_regime import REGIME
+
+    register = {
+        f.code.upper(): f
+        for f in (await db.execute(select(Fertiliser))).scalars()
+    }
+
+    out: list[FertigationTankIn] = []
+    for code, volume_l, lines in REGIME:
+        resolved = []
+        for position, (fert_code, quantity) in enumerate(lines):
+            f = register.get(fert_code.upper())
+            if f is None:
+                log.warning(
+                    "Regime names %r for tank %s but it is not in the register; "
+                    "the line is omitted rather than sent unresolved.",
+                    fert_code,
+                    code,
+                )
+                continue
+            resolved.append(
+                FertigationLineIn(
+                    fertiliser_id=f.id,
+                    fertiliser_code=f.code,
+                    fertiliser_name=f.name,
+                    quantity=quantity,
+                    unit=f.unit,
+                    position=position,
+                )
+            )
+        out.append(
+            FertigationTankIn(
+                code=code,
+                volume_l=volume_l,
+                # Always derived: the report is explicit that the set count is
+                # whatever the water calls for, not a figure set in advance.
+                sets_mode="auto",
+                sets=1.0,
+                lines=resolved,
+            )
+        )
+    return out
 
 
 # ───────────────────────────────── Phases ────────────────────────────────────
@@ -320,7 +388,6 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
         source_note=calc.source_mismatch(row.volume_m3, row.sources),
         blocks_total_m3=calc.blocks_total_m3(ordered_blocks),
         block_note=calc.block_mismatch(row.volume_m3, ordered_blocks),
-        planned_m3=calc.planned_m3(row.target_m3_per_ha, summed_area),
         signature_count=await _signature_count(db, row.doc_id),
     )
 
@@ -334,7 +401,7 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
     for field in (
         "activity", "event_date", "start_time", "phase_id",
         "type_of_application", "volume_m3", "area_ha",
-        "target_m3_per_ha", "weather", "fertiliser_rate_l_m3", "acid_rate_l_m3", "applicator_id", "comments",
+        "weather", "fertiliser_rate_l_m3", "acid_rate_l_m3", "applicator_id", "comments",
         "status",
     ):
         setattr(row, field, getattr(payload, field))
@@ -395,6 +462,13 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
     # Area follows the selection unless it was set by hand.
     if payload.area_ha is None:
         row.area_ha = calc.selected_area_ha(row.blocks) or None
+
+    # The rate is what the water came to over that area, computed here rather
+    # than accepted from the caller. It used to be a second editable field
+    # beside the volume, which let a sheet state a rate its own figures did not
+    # support. Stored rather than derived on read, so a signed sheet keeps its
+    # number if a block is re-measured later.
+    row.target_m3_per_ha = calc.applied_rate_m3_per_ha(row.volume_m3, row.area_ha)
 
     register = {
         f.id: f for f in (await db.execute(select(Fertiliser))).scalars()

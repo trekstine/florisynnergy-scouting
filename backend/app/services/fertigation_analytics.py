@@ -194,22 +194,45 @@ async def water(
     end: date | None = None,
     activity: str | None = None,
 ) -> list[FertigationWaterRow]:
-    """One row per sheet: water applied against the rate that was planned."""
+    """One row per sheet: water applied, against how that phase is usually fed.
+
+    There is no typed target to compare against any more — the rate *is* the
+    water over the area — so the useful comparison is with the phase's own mean
+    across the range. A block fed 18% heavier than usual is worth a look; a
+    block matching its own average is not.
+    """
     sheets = await _sheets(db, start=start, end=end, activity=activity)
 
-    out: list[FertigationWaterRow] = []
+    # Phase means, computed first so every row can be measured against one.
+    rates: dict[str, list[float]] = defaultdict(list)
+    computed: list[tuple[Fertigation, float, float | None]] = []
     for sheet in sheets:
         area = _sheet_area(sheet)
-        volume = float(sheet.volume_m3) if sheet.volume_m3 is not None else None
         per_ha = calc.m3_per_ha(sheet.volume_m3, area or None)
-        target = (
-            float(sheet.target_m3_per_ha) if sheet.target_m3_per_ha is not None else None
-        )
+        computed.append((sheet, area, per_ha))
+        if per_ha is not None:
+            rates[sheet.phase or ""].append(per_ha)
+
+    means = {
+        key: round(sum(values) / len(values), 2)
+        for key, values in rates.items()
+        if values
+    }
+
+    out: list[FertigationWaterRow] = []
+    for sheet, area, per_ha in computed:
+        key = sheet.phase or ""
+        mean = means.get(key)
+        # A phase with a single sheet has no "usual" to compare against, and
+        # reporting 0% variance would read as agreement rather than as an
+        # absence of evidence.
+        comparable = mean is not None and per_ha is not None and len(rates[key]) > 1
         variance = (
-            round((per_ha - target) / target * 100, 1)
-            if per_ha is not None and target
+            round((per_ha - mean) / mean * 100, 1)
+            if comparable and mean
             else None
         )
+
         ordered = sorted(sheet.blocks, key=lambda b: (b.position, b.name or ""))
         label = ", ".join(b.name for b in ordered[:3] if b.name) or None
         if label and len(ordered) > 3:
@@ -223,9 +246,9 @@ async def water(
                 phase=sheet.phase,
                 blocks=label,
                 area_ha=round(area, 4) if area else None,
-                volume_m3=volume,
+                volume_m3=float(sheet.volume_m3) if sheet.volume_m3 is not None else None,
                 m3_per_ha=per_ha,
-                target_m3_per_ha=target,
+                phase_avg_m3_per_ha=mean if comparable else None,
                 variance_pct=variance,
                 total_cost=round(_sheet_cost(sheet), 2),
                 status=sheet.status,

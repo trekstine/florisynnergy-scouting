@@ -721,8 +721,6 @@ export interface Fertigation {
   blocks_total_m3: number;
   /** Set when the per-greenhouse volumes do not add up to the water applied. */
   block_note: string | null;
-  /** Target rate × area fed — the report's "m³ used = 33.33 × area". */
-  planned_m3: number | null;
   signature_count: number;
 }
 
@@ -738,7 +736,6 @@ export interface FertigationBody {
   type_of_application?: string | null;
   volume_m3?: number | null;
   area_ha?: number | null;
-  target_m3_per_ha?: number | null;
   weather?: string | null;
   fertiliser_rate_l_m3: number;
   acid_rate_l_m3: number;
@@ -793,8 +790,9 @@ export interface FertigationWaterRow {
   area_ha: number | null;
   volume_m3: number | null;
   m3_per_ha: number | null;
-  target_m3_per_ha: number | null;
-  /** Actual against target, as a percentage. Negative means underfed. */
+  /** The phase's own mean over the range; null when there is only one sheet. */
+  phase_avg_m3_per_ha: number | null;
+  /** This sheet against that mean. +18 means 18% heavier than usual. */
   variance_pct: number | null;
   total_cost: number;
   status: string;
