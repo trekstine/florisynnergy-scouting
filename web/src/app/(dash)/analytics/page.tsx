@@ -7,7 +7,11 @@ import {
   Bug,
   Building2,
   Download,
+  Droplets,
+  FileText,
+  LayoutGrid,
   ShieldCheck,
+  SprayCan,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
@@ -88,7 +92,32 @@ const TABS = [
   { id: "fert-usage", group: "Fertigation", label: "Fertiliser usage", blurb: "How much of each product left the store, for reconciliation and ordering." },
 ] as const;
 
-const TAB_GROUPS = ["Scouting", "Spray", "Fertigation"] as const;
+/**
+ * The three things a farm does, plus the summary.
+ *
+ * The reports used to sit in one scrolling row of fifteen pills with the group
+ * name as a small inline caption — so moving from a spray report to a
+ * fertigation one meant reading along a strip that ran off the edge of the
+ * screen, and the fertigation reports were the ones past the fold. The module
+ * is now the first choice and its reports the second, which is the order
+ * somebody actually thinks in.
+ */
+const MODULES = [
+  { id: "Overview", label: "Overview", icon: LayoutGrid, hint: "Everything, summarised" },
+  { id: "Scouting", label: "Scouting", icon: Bug, hint: "What the scouts found" },
+  { id: "Spray", label: "Spray", icon: SprayCan, hint: "What went on the crop" },
+  { id: "Fertigation", label: "Fertigation", icon: Droplets, hint: "What the crop was fed" },
+] as const;
+
+type ModuleId = (typeof MODULES)[number]["id"];
+
+/** The tab a module opens on. */
+const MODULE_HOME: Record<ModuleId, TabId> = {
+  Overview: "overview",
+  Scouting: "table",
+  Spray: "spray",
+  Fertigation: "fert-cost",
+};
 
 type TabId = (typeof TABS)[number]["id"];
 
@@ -169,6 +198,10 @@ export default function AnalyticsPage() {
   const [filters, setFilters] = useState<Filters>(defaultFilters(30));
   const [recordSearch, setRecordSearch] = useState("");
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  // Which module's reports are on show. Derived from the tab so a deep link or
+  // a programmatic jump lands with the right module lit up.
+  const activeModule: ModuleId =
+    (TABS.find((t) => t.id === activeTab)?.group as ModuleId) || "Overview";
   const [fertGroup, setFertGroup] = useState("phase");
 
   const summary = useSummary(filters);
@@ -430,7 +463,6 @@ export default function AnalyticsPage() {
     return { data, keys };
   }, [filteredSpray, ghCode]);
   const chemicalBreakdown = useMemo(() => countBy(filteredSpray, (r) => r.product), [filteredSpray]);
-  const chemicalCostBreakdown = useMemo(() => costBy(filteredSpray, (r) => r.product), [filteredSpray]);
   // Full variety names, not the three-letter code the record stores.
   const varietyCostBreakdown = useMemo(
     () =>
@@ -451,17 +483,69 @@ export default function AnalyticsPage() {
   );
 
   /** Litres/kg of product actually applied — spend hides a cheap product used heavily. */
-  const chemicalQtyBreakdown = useMemo(() => {
-    const totals = new Map<string, number>();
+  /**
+   * Chemical spend and quantity, split by the block it went on.
+   *
+   * A ranked bar answers "which product costs most" and stops there. The next
+   * question a manager always asks is *where* — one block driving a product's
+   * whole spend is a different problem from the same spend spread evenly, and
+   * the two look identical on a single bar.
+   *
+   * Shaped for StackedBarChart: one row per chemical, one numeric field per
+   * greenhouse. Blocks beyond the top few are folded into "Other" rather than
+   * given their own colour, because twenty stacked segments is a smear.
+   */
+  const { chemicalByBlock, chemicalQtyByBlock, blockKeys } = useMemo(() => {
+    const spendPerBlock = new Map<string, number>();
     for (const r of filteredSpray) {
-      const key = r.product?.trim() || "Unspecified";
-      totals.set(key, (totals.get(key) ?? 0) + (r.qty ?? 0));
+      const gh = r.greenhouse_id ? (ghName.get(r.greenhouse_id) ?? "—") : "—";
+      spendPerBlock.set(gh, (spendPerBlock.get(gh) ?? 0) + (r.cost_of_chemical ?? 0));
     }
-    return Array.from(totals.entries())
-      .map(([label, value]) => ({ label, value: Math.round(value * 1000) / 1000 }))
-      .filter((r) => r.value > 0)
-      .sort((a, b) => b.value - a.value);
-  }, [filteredSpray]);
+    const top = [...spendPerBlock.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name]) => name);
+    const named = new Set(top);
+    const bucket = (gh: string) => (named.has(gh) ? gh : "Other blocks");
+
+    const build = (pick: (r: SprayRecord) => number) => {
+      const rows = new Map<string, Record<string, string | number>>();
+      for (const r of filteredSpray) {
+        const product = r.product?.trim() || "Unspecified";
+        const gh = bucket(r.greenhouse_id ? (ghName.get(r.greenhouse_id) ?? "—") : "—");
+        const row = rows.get(product) ?? { label: product };
+        row[gh] = ((row[gh] as number) ?? 0) + pick(r);
+        rows.set(product, row);
+      }
+      return [...rows.values()]
+        .map((row) => {
+          const out: Record<string, string | number> = { label: String(row.label) };
+          let total = 0;
+          for (const [k, v] of Object.entries(row)) {
+            if (k === "label") continue;
+            const n = Math.round((v as number) * 100) / 100;
+            if (n > 0) {
+              out[k] = n;
+              total += n;
+            }
+          }
+          out.__total = total;
+          return out;
+        })
+        .filter((row) => (row.__total as number) > 0)
+        .sort((a, b) => (b.__total as number) - (a.__total as number))
+        .slice(0, 10);
+    };
+
+    const keys = [...top];
+    if (spendPerBlock.size > top.length) keys.push("Other blocks");
+
+    return {
+      chemicalByBlock: build((r) => r.cost_of_chemical ?? 0),
+      chemicalQtyByBlock: build((r) => r.qty ?? 0),
+      blockKeys: keys,
+    };
+  }, [filteredSpray, ghName]);
 
   const totalSprayCost = useMemo(
     () => filteredSpray.reduce((s, r) => s + (r.cost_of_chemical ?? 0), 0),
@@ -738,44 +822,53 @@ export default function AnalyticsPage() {
 
       {/* Grouped report nav — scouting and spray reports were previously one
           undifferentiated row of twelve pills. */}
-      <div className="sticky top-0 z-10 border-b border-line bg-white/95 px-6 backdrop-blur">
-        <nav className="flex items-center gap-4 overflow-x-auto py-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab("overview")}
-            className={clsx(
-              "whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors",
-              activeTab === "overview"
-                ? "bg-brand-600 text-white"
-                : "text-ink-soft hover:bg-surface",
-            )}
-          >
-            Overview
-          </button>
-
-          {TAB_GROUPS.map((group) => (
-            <div key={group} className="flex items-center gap-1">
-              <span className="mr-1 border-l border-line pl-4 text-[10px] font-bold uppercase tracking-[0.14em] text-ink-faint">
-                {group}
-              </span>
-              {TABS.filter((t) => t.group === group).map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setActiveTab(t.id)}
-                  className={clsx(
-                    "whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
-                    activeTab === t.id
-                      ? "bg-brand-600 text-white"
-                      : "text-ink-soft hover:bg-surface",
-                  )}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          ))}
+      <div className="sticky top-0 z-10 border-b border-line bg-white/95 backdrop-blur">
+        {/* First choice: which of the farm's three activities. */}
+        <nav className="flex items-center gap-1 overflow-x-auto px-6 pt-2">
+          {MODULES.map((m) => {
+            const Icon = m.icon;
+            const on = activeModule === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setActiveTab(MODULE_HOME[m.id])}
+                title={m.hint}
+                className={clsx(
+                  "flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3.5 py-2 text-sm font-semibold transition-colors",
+                  on
+                    ? "border-brand-600 text-brand-700"
+                    : "border-transparent text-ink-faint hover:text-ink",
+                )}
+              >
+                <Icon size={15} />
+                {m.label}
+              </button>
+            );
+          })}
         </nav>
+
+        {/* Second choice: which report within it. Overview has only itself, so
+            the row is dropped rather than shown holding one lit pill. */}
+        {activeModule !== "Overview" && (
+          <nav className="flex items-center gap-1 overflow-x-auto px-6 pb-2 pt-1.5">
+            {TABS.filter((t) => t.group === activeModule).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActiveTab(t.id)}
+                className={clsx(
+                  "whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
+                  activeTab === t.id
+                    ? "bg-brand-600 text-white"
+                    : "text-ink-soft hover:bg-surface",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        )}
       </div>
 
       {activeTab !== "overview" && (
@@ -1547,22 +1640,28 @@ export default function AnalyticsPage() {
         <div className="space-y-5 px-6">
           <Card>
             <CardHeader
-              title="Chemical spend"
-              subtitle="Products ranked by total cost in the selected range."
+              title="Chemical spend, by block"
+              subtitle="Each product's cost split across the greenhouses it went on. One block driving a product's whole spend is a different problem from the same spend spread evenly."
             />
             <div className="p-4">
               {spray.isLoading ? (
                 <Spinner />
-              ) : chemicalCostBreakdown.length === 0 ? (
+              ) : chemicalByBlock.length === 0 ? (
                 <EmptyState>No spray cost data in range.</EmptyState>
               ) : (
-                <RankedBarChart
-                  data={chemicalCostBreakdown.slice(0, 10).map((r) => ({ label: r.label, value: r.value }))}
-                  color="#dc2626"
-                  height={300}
-                  seriesLabel="Spend"
-                  format="money"
-                />
+                <>
+                  <StackedBarChart
+                    data={chemicalByBlock}
+                    keys={blockKeys}
+                    colors={STACK_COLORS}
+                    height={320}
+                    xKey="label"
+                  />
+                  <p className="mt-2 text-xs text-ink-faint">
+                    Top six blocks by spend are named; the rest are grouped, because
+                    twenty stacked segments is a smear rather than a chart.
+                  </p>
+                </>
               )}
             </div>
           </Card>
@@ -1570,20 +1669,21 @@ export default function AnalyticsPage() {
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <Card>
               <CardHeader
-                title="Quantity used"
-                subtitle="How much product actually went out — a cheap product used heavily hides in a spend chart."
+                title="Quantity used, by block"
+                subtitle="How much product actually went out, and where — a cheap product used heavily hides in a spend chart."
               />
               <div className="p-4">
                 {spray.isLoading ? (
                   <Spinner />
-                ) : chemicalQtyBreakdown.length === 0 ? (
+                ) : chemicalQtyByBlock.length === 0 ? (
                   <EmptyState>No product quantities recorded in range.</EmptyState>
                 ) : (
-                  <HBarChart
-                    data={chemicalQtyBreakdown.slice(0, 8)}
-                    color="#0891b2"
-                    height={220}
-                    seriesLabel="Quantity (L / kg)"
+                  <StackedBarChart
+                    data={chemicalQtyByBlock}
+                    keys={blockKeys}
+                    colors={STACK_COLORS}
+                    height={260}
+                    xKey="label"
                   />
                 )}
               </div>
@@ -1632,6 +1732,24 @@ export default function AnalyticsPage() {
               )}
             </div>
           </Card>
+        </div>
+      )}
+
+      {activeModule === "Fertigation" && (
+        <div className="flex justify-end px-6">
+          {/* Reachable from where the numbers are, not only from the list. */}
+          <Link
+            href={`/fertigation-report?${new URLSearchParams(
+              Object.entries({
+                start: filters.start ?? "",
+                end: filters.end ?? "",
+              }).filter(([, v]) => v) as [string, string][],
+            )}`}
+            target="_blank"
+            className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+          >
+            <FileText size={14} /> Printable report for this range
+          </Link>
         </div>
       )}
 

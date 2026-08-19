@@ -4,6 +4,7 @@ import {
   Beaker,
   Droplets,
   FileCheck2,
+  FileText,
   Lock,
   Pencil,
   Plus,
@@ -164,6 +165,24 @@ export default function FertigationPage() {
             actions={
               <div className="flex flex-wrap items-center gap-2">
                 <DateRange value={range} onChange={setRange} presets={FERT_RANGES} />
+                {/* The single sheet is the authorisation; this is the record of
+                    what went on across the period, matching the chemical
+                    report on the spray side. */}
+                <Link
+                  href={`/fertigation-report?${new URLSearchParams(
+                    Object.entries({
+                      start: range.start ?? "",
+                      end: range.end ?? "",
+                      activity,
+                      greenhouse_id: greenhouse,
+                    }).filter(([, v]) => v) as [string, string][],
+                  )}`}
+                  target="_blank"
+                  title="Printable report of every fertigation in range"
+                  className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+                >
+                  <FileText size={14} /> Period report
+                </Link>
                 <Select
                   value={activity}
                   onChange={(e) => setActivity(e.target.value)}
