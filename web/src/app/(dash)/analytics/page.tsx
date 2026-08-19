@@ -2004,18 +2004,18 @@ export default function AnalyticsPage() {
  * report that looks authoritative while resting on invented figures is worse
  * than no report — somebody will budget against it.
  */
-function PlaceholderPriceNote() {
-  return (
-    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-      <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-      <span>
-        <strong>Costs are indicative.</strong> The fertiliser register still
-        carries placeholder prices. Enter your invoice prices under Settings →
-        Fertilisers and every figure here becomes real.
-      </span>
-    </div>
-  );
-}
+// function PlaceholderPriceNote() {
+//   return (
+//     <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+//       <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+//       <span>
+//         <strong>Costs are indicative.</strong> The fertiliser register still
+//         carries placeholder prices. Enter your invoice prices under Settings →
+//         Fertilisers and every figure here becomes real.
+//       </span>
+//     </div>
+//   );
+// }
 
 function deltaHint(pct: number | null | undefined) {
   if (pct == null) return "No prior period";
