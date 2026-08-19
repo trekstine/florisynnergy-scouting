@@ -239,7 +239,7 @@ export default function ScoutingRoundPage() {
                   <th className="px-3 py-2.5 font-semibold">Scouting method</th>
                   <th className="px-3 py-2.5 font-semibold">Pest / Disease</th>
                   <th className="px-3 py-2.5 font-semibold">Variety</th>
-                  <th className="px-3 py-2.5 font-semibold">Crop stage</th>
+                  <th className="px-3 py-2.5 font-semibold">Stage</th>
                   <th className="px-3 py-2.5 font-semibold">Where on plant</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Counts</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Severity (0–5)</th>

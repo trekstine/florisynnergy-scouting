@@ -18,11 +18,11 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import {
-  FilterBar,
-  RANGES_WITH_TODAY,
-  defaultFilters,
-  isoDaysAgo,
-} from "@/components/FilterBar";
+  activePreset,
+  describeRange,
+  PRESETS_WITH_TODAY,
+} from "@/components/DateRange";
+import { FilterBar, defaultFilters } from "@/components/FilterBar";
 import { PaginationBar, usePagination } from "@/components/Pagination";
 import {
   Badge,
@@ -57,7 +57,7 @@ import {
 import type { Filters, Recommendation, ScoutingRecord } from "@/lib/types";
 
 /** Shared with the dashboard, so "Today" means the same thing on both. */
-const RANGES = RANGES_WITH_TODAY;
+const RANGES = PRESETS_WITH_TODAY;
 
 const RANGE_NOUN: Record<number, string> = {
   1: "today",
@@ -89,9 +89,14 @@ export default function ScoutingPage() {
 
   const start = filters.start ?? "";
   const end = filters.end ?? "";
-  const activeDays =
-    RANGES.find((r) => filters.start === isoDaysAgo(r.days))?.days ?? 0;
-  const rangeNoun = RANGE_NOUN[activeDays] ?? "in range";
+  // Reads back in the headings: "Records in the last 7 days", or the dates
+  // themselves once somebody picks an exact range — a heading still saying
+  // "in the last 7 days" over a custom window would be a plain lie.
+  const preset = activePreset(filters, RANGES);
+  const rangeNoun =
+    preset?.days != null
+      ? (RANGE_NOUN[preset.days] ?? "in range")
+      : `· ${describeRange(filters, RANGES)}`;
 
   const greenhouses = useGreenhouses();
   const pests = usePests();

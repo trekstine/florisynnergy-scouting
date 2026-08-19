@@ -19,6 +19,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 
+import {
+  DateRange,
+  describeRange,
+  isoDaysAgo,
+  today,
+  type DateRangeValue,
+  type RangePreset,
+} from "@/components/DateRange";
 import { Badge, Button, Card, EmptyState, PageHeader, Select, Spinner } from "@/components/ui";
 import { formatDate, severityHex } from "@/lib/format";
 import {
@@ -49,13 +57,17 @@ export default function ScoutingRoundsPage() {
   );
 }
 
-const RANGES = [
-  { id: "1", label: "Today" },
-  { id: "2", label: "Yesterday" },
-  { id: "7", label: "Last 7 days" },
-  { id: "30", label: "Last 30 days" },
-  { id: "", label: "All" },
-] as const;
+/**
+ * Yesterday is its own preset here and nowhere else, because this is the
+ * screen a farm manager opens to ask "what did the scouts find yesterday" —
+ * a window ending last night rather than one running up to now.
+ */
+const RANGES: RangePreset[] = [
+  { label: "Today", days: 1 },
+  { label: "Last 7 days", days: 7 },
+  { label: "Last 30 days", days: 30 },
+  { label: "All", days: null },
+];
 
 /** Local midnight, N days back — the boundary a farm actually means by "yesterday". */
 function dayStart(daysAgo: number): Date {
@@ -74,7 +86,15 @@ function RoundsList() {
   const [variety, setVariety] = useState("");
   const [scout, setScout] = useState("");
   const [minSeverity, setMinSeverity] = useState("");
-  const [range, setRange] = useState(search.get("range") ?? "7");
+  const [range, setRange] = useState<DateRangeValue>(() => {
+    // Deep links may still carry ?range=7 from an older link; honour it.
+    const legacy = search.get("range");
+    if (legacy === "") return {};
+    const days = Number(legacy || 7);
+    return Number.isFinite(days) && days > 0
+      ? { start: isoDaysAgo(days), end: today() }
+      : { start: isoDaysAgo(7), end: today() };
+  });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const houses = useGreenhouses();
@@ -102,18 +122,14 @@ function RoundsList() {
    */
   const days = useMemo(() => {
     const rows = q.data ?? [];
-    const from =
-      range === ""
-        ? null
-        : range === "2"
-          ? dayStart(1) // yesterday only
-          : dayStart(Number(range) - 1);
-    const to = range === "2" ? dayStart(0) : null;
-
+    // Compared as local calendar days, not as instants: a round walked at
+    // 07:00 belongs to that morning's date wherever the server stored it, and
+    // comparing timestamps would drop the first three hours of every day in
+    // any timezone ahead of UTC.
     const kept = rows.filter((r) => {
-      const at = new Date(r.started_at);
-      if (from && at < from) return false;
-      if (to && at >= to) return false;
+      const day = new Date(r.started_at).toLocaleDateString("en-CA");
+      if (range.start && day < range.start) return false;
+      if (range.end && day > range.end) return false;
       return true;
     });
 
@@ -136,7 +152,7 @@ function RoundsList() {
         worst: rounds.reduce((s, r) => Math.max(s, r.max_severity), 0),
         programs: rounds.reduce((s, r) => s + r.programs, 0),
       }));
-  }, [q.data, range]);
+  }, [q.data, range.start, range.end]);
 
   /** Exactly the rows on screen, in the order they appear. */
   const visible = useMemo(() => days.flatMap((d) => d.rounds), [days]);
@@ -154,7 +170,7 @@ function RoundsList() {
     }
     if (scout) out.push(`Scout: ${label(scout, employees.data ?? []) ?? scout}`);
     if (minSeverity) out.push(`Severity ${minSeverity}+`);
-    out.push(RANGES.find((r) => r.id === range)?.label ?? "All");
+    out.push(describeRange(range, RANGES));
     return out;
   }, [
     greenhouse, pest, disease, variety, scout, minSeverity, range,
@@ -277,19 +293,7 @@ function RoundsList() {
 
           {/* Range chips — "what happened yesterday" in one click. */}
           <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
-            {RANGES.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => setRange(r.id)}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${
-                  range === r.id
-                    ? "border-brand-600 bg-brand-50 text-brand-700"
-                    : "border-line text-ink-soft hover:bg-surface hover:text-ink"
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
+            <DateRange value={range} onChange={setRange} presets={RANGES} />
             {filtered && (
               <button
                 onClick={clearFilters}

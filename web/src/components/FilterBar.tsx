@@ -2,6 +2,13 @@
 
 import { Filter, X } from "lucide-react";
 
+import {
+  DateRange,
+  PRESETS_WITH_TODAY,
+  isoDaysAgo,
+  today,
+  type RangePreset,
+} from "@/components/DateRange";
 import { Select } from "@/components/ui";
 import { SCOUTING_LABEL } from "@/lib/format";
 import {
@@ -13,31 +20,18 @@ import {
 } from "@/lib/hooks";
 import type { Filters, ScoutingFor } from "@/lib/types";
 
-const DEFAULT_RANGES: { label: string; days: number }[] = [
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
-  { label: "90d", days: 90 },
-];
-
 /**
  * Presets for the screens a manager opens to ask "what happened today".
  *
  * `days: 1` really does mean today only — `isoDaysAgo` subtracts `days - 1`,
  * so the window starts this morning rather than yesterday's.
  */
-export const RANGES_WITH_TODAY: { label: string; days: number }[] = [
-  { label: "Today", days: 1 },
-  ...DEFAULT_RANGES,
-];
+export const RANGES_WITH_TODAY = PRESETS_WITH_TODAY;
 
-export function isoDaysAgo(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - (days - 1));
-  return d.toISOString().slice(0, 10);
-}
+export { isoDaysAgo };
 
 export function defaultFilters(days = 30): Filters {
-  return { start: isoDaysAgo(days), end: new Date().toISOString().slice(0, 10) };
+  return { start: isoDaysAgo(days), end: today() };
 }
 
 export function FilterBar({
@@ -49,7 +43,7 @@ export function FilterBar({
   showVariety = true,
   showScout = false,
   showType = true,
-  ranges = DEFAULT_RANGES,
+  ranges,
 }: {
   value: Filters;
   onChange: (f: Filters) => void;
@@ -61,7 +55,7 @@ export function FilterBar({
   showScout?: boolean;
   showType?: boolean;
   /** Override the date presets, e.g. to offer "Today" on the records list. */
-  ranges?: { label: string; days: number }[];
+  ranges?: RangePreset[];
 }) {
   const greenhouses = useGreenhouses();
   const pests = usePests();
@@ -70,9 +64,6 @@ export function FilterBar({
   const employees = useEmployees();
 
   const scouts = (employees.data ?? []).filter((e) => e.role === "scout");
-
-  const activeDays =
-    ranges.find((r) => value.start === isoDaysAgo(r.days))?.days ?? -1;
 
   const hasActive =
     value.greenhouse_id != null ||
@@ -90,27 +81,11 @@ export function FilterBar({
         <Filter size={14} /> Filters
       </span>
 
-      <div className="flex overflow-hidden rounded-lg border border-line">
-        {ranges.map((r) => (
-          <button
-            key={r.days}
-            onClick={() =>
-              onChange({
-                ...value,
-                start: isoDaysAgo(r.days),
-                end: new Date().toISOString().slice(0, 10),
-              })
-            }
-            className={`px-3 py-1.5 text-xs font-semibold ${
-              activeDays === r.days
-                ? "bg-brand-600 text-white"
-                : "bg-white text-ink-soft hover:bg-surface"
-            }`}
-          >
-            {r.label}
-          </button>
-        ))}
-      </div>
+      <DateRange
+        value={value}
+        onChange={(range) => onChange({ ...value, ...range })}
+        presets={ranges}
+      />
 
       {showGreenhouse && (
         <Select

@@ -12,6 +12,14 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 
+import {
+  DateRange,
+  describeRange,
+  isoDaysAgo,
+  today,
+  type DateRangeValue,
+  type RangePreset,
+} from "@/components/DateRange";
 import { FertigationBuilder } from "@/components/FertigationBuilder";
 import { PaginationBar, usePagination } from "@/components/Pagination";
 import {
@@ -53,10 +61,28 @@ const STATUS_HEX: Record<string, string> = {
  * columns are the four questions a manager asks of the list: when, where, how
  * much water, what did it cost.
  */
+/**
+ * Wider than the scouting presets on purpose. Feeding is a seasonal record
+ * read against last year's, not a daily watch list, so a season and a year
+ * are the windows a manager actually asks for.
+ */
+const FERT_RANGES: RangePreset[] = [
+  { label: "30d", days: 30 },
+  { label: "90d", days: 90 },
+  { label: "1y", days: 365 },
+  { label: "All", days: null },
+];
+
 export default function FertigationPage() {
   const [activity, setActivity] = useState("");
   const [greenhouse, setGreenhouse] = useState("");
   const [status, setStatus] = useState("");
+  // Sheets accumulate quickly — a season is hundreds — so the list opens on
+  // the last 30 days rather than on everything ever raised.
+  const [range, setRange] = useState<DateRangeValue>(() => ({
+    start: isoDaysAgo(30),
+    end: today(),
+  }));
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editing, setEditing] = useState<Fertigation | null>(null);
 
@@ -67,10 +93,18 @@ export default function FertigationPage() {
     activity: activity || undefined,
     greenhouse_id: greenhouse ? Number(greenhouse) : undefined,
     status: status || undefined,
+    start: range.start,
+    end: range.end,
   });
 
   const rows = q.data ?? [];
-  const paged = usePagination(rows, 20, `${activity}|${greenhouse}|${status}`);
+  // The pagination key includes the range, so changing the dates returns to
+  // page one instead of leaving the reader on a page that no longer exists.
+  const paged = usePagination(
+    rows,
+    20,
+    `${activity}|${greenhouse}|${status}|${range.start ?? ""}|${range.end ?? ""}`,
+  );
 
   const canEdit = me.data?.role === "admin" || me.data?.role === "supervisor";
   const totalCost = rows.reduce((s, r) => s + r.total_cost, 0);
@@ -126,9 +160,10 @@ export default function FertigationPage() {
         <Card>
           <CardHeader
             title="Sheets"
-            subtitle="Newest first. Open one to see the tanks and raise the document."
+            subtitle={`Newest first · ${describeRange(range, FERT_RANGES)}. Open one to see the tanks and raise the document.`}
             actions={
               <div className="flex flex-wrap items-center gap-2">
+                <DateRange value={range} onChange={setRange} presets={FERT_RANGES} />
                 <Select
                   value={activity}
                   onChange={(e) => setActivity(e.target.value)}
