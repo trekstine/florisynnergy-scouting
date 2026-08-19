@@ -6,5 +6,5 @@ import path from "node:path";
 // returns. Both were places where a wrong answer reached a user silently.
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
-  test: { environment: "node", include: ["src/**/*.test.ts"] },
+  test: { environment: "node", include: ["src/**/*.test.ts", "src/**/*.test.tsx"] },
 });

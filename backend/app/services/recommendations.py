@@ -27,10 +27,30 @@ from .etl import effective_threshold
 HOTSPOT_SEVERITY = 4
 
 
+async def _is_provisional(db: AsyncSession, rec: ScoutingRecord) -> bool:
+    """Is this record's pest or disease still awaiting an agronomist's ETL?"""
+    if rec.scouting_for == "disease" and rec.disease_id:
+        row = await db.get(Disease, rec.disease_id)
+    elif rec.pest_id:
+        row = await db.get(Pest, rec.pest_id)
+    else:
+        return False
+    return bool(row and getattr(row, "is_provisional", False))
+
+
 async def evaluate_entry(db: AsyncSession, rec: ScoutingRecord) -> bool:
     """Create a recommendation if this entry breaches its effective threshold
     or is a hotspot. Returns True if one was created. Caller owns the commit."""
     if rec.greenhouse_id is None or rec.severity <= 0:
+        return False
+
+    # A provisional agent is one the scouting app named and the portal created
+    # on sight. It is recorded, filtered and charted like any other — but its
+    # threshold is a default nobody chose, so escalating against it would raise
+    # an alarm on a number the agronomist has never seen. The finding is not
+    # lost: it sits in the records and in the pressure map, waiting for a
+    # threshold to be set on the reference page.
+    if await _is_provisional(db, rec):
         return False
 
     is_hotspot = rec.severity >= HOTSPOT_SEVERITY

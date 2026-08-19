@@ -16,7 +16,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { FilterBar, defaultFilters, isoDaysAgo } from "@/components/FilterBar";
+import {
+  FilterBar,
+  RANGES_WITH_TODAY,
+  defaultFilters,
+  isoDaysAgo,
+} from "@/components/FilterBar";
 import { PressureMap } from "@/components/map";
 import { Badge, Card, CardHeader, EmptyState, Spinner } from "@/components/ui";
 import { bedLabel, PRESSURE_HEX, PRESSURE_LABEL, relativeTime, SCOUTING_LABEL, severityHex } from "@/lib/format";
@@ -213,7 +218,10 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-6">
-        <FilterBar value={filters} onChange={setFilters} />
+        {/* "Today" first: the dashboard's job is what needs attention now,
+            and a manager checking on the morning's rounds should not have to
+            read them out of a 7-day total. */}
+        <FilterBar value={filters} onChange={setFilters} ranges={RANGES_WITH_TODAY} />
       </div>
 
       {/* ── Period KPIs ── */}

@@ -14,6 +14,9 @@ from ..schemas import (
     AnalyticsSummary,
     BedPressure,
     BreakdownRow,
+    FertigationCostRow,
+    FertigationUsageRow,
+    FertigationWaterRow,
     GreenhousePressure,
     ObservationPoint,
     PestMatrixCell,
@@ -24,6 +27,7 @@ from ..schemas import (
     TrendPoint,
 )
 from ..services import analytics
+from ..services import fertigation_analytics as fert_analytics
 from ..services.analytics import Filters
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -152,3 +156,43 @@ async def scout_movement(
 @router.get("/spray-cost", response_model=list[SprayCostRow])
 async def spray_cost(db: AsyncSession = Depends(get_db), _=Manager):
     return await analytics.spray_cost(db)
+
+
+# ───────────────────────────── Fertigation ───────────────────────────────────
+# Kept beside the spray reports rather than on the fertigation page: a manager
+# comparing what the farm spends on chemistry against what it spends on feed is
+# asking one question, and should not have to hold two screens in their head.
+@router.get("/fertigation/cost", response_model=list[FertigationCostRow])
+async def fertigation_cost(
+    db: AsyncSession = Depends(get_db),
+    group: str = Query(default="phase", pattern="^(phase|block|month|activity)$"),
+    start: date | None = Query(default=None),
+    end: date | None = Query(default=None),
+    activity: str | None = Query(default=None),
+    _=Manager,
+):
+    return await fert_analytics.cost_by(
+        db, group, start=start, end=end, activity=activity
+    )
+
+
+@router.get("/fertigation/usage", response_model=list[FertigationUsageRow])
+async def fertigation_usage(
+    db: AsyncSession = Depends(get_db),
+    start: date | None = Query(default=None),
+    end: date | None = Query(default=None),
+    activity: str | None = Query(default=None),
+    _=Manager,
+):
+    return await fert_analytics.usage(db, start=start, end=end, activity=activity)
+
+
+@router.get("/fertigation/water", response_model=list[FertigationWaterRow])
+async def fertigation_water(
+    db: AsyncSession = Depends(get_db),
+    start: date | None = Query(default=None),
+    end: date | None = Query(default=None),
+    activity: str | None = Query(default=None),
+    _=Manager,
+):
+    return await fert_analytics.water(db, start=start, end=end, activity=activity)

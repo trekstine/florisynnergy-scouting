@@ -761,3 +761,39 @@ export interface FertigationBody {
   }[];
   sources: FertigationSource[];
 }
+
+// ── Fertigation analytics ──
+export interface FertigationCostRow {
+  key: string;
+  sheets: number;
+  volume_m3: number;
+  area_ha: number;
+  m3_per_ha: number | null;
+  total_cost: number;
+}
+
+export interface FertigationUsageRow {
+  code: string;
+  name: string | null;
+  unit: string;
+  quantity: number;
+  tanks: number;
+  sheets: number;
+  total_cost: number;
+}
+
+export interface FertigationWaterRow {
+  doc_id: string;
+  reference: string | null;
+  event_date: string;
+  phase: string | null;
+  blocks: string | null;
+  area_ha: number | null;
+  volume_m3: number | null;
+  m3_per_ha: number | null;
+  target_m3_per_ha: number | null;
+  /** Actual against target, as a percentage. Negative means underfed. */
+  variance_pct: number | null;
+  total_cost: number;
+  status: string;
+}

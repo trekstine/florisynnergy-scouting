@@ -121,3 +121,36 @@ def test_resolution_collects_and_dedupes_misses():
 
 def test_resolution_is_empty_when_everything_matched():
     assert Resolution().as_dict() == {}
+
+
+# ── the "seen, not yet mapped" placeholder ──────────────────────────────────
+# `_note_unmatched` records an unresolved name as an alias with `target_id = 0`
+# so an admin can map it later. Zero is not a row id, and the resolver used to
+# hand it straight back: the first submission carrying an unknown name logged
+# the placeholder, and every submission after that wrote 0 into a foreign key.
+def test_placeholder_alias_is_not_treated_as_a_match():
+    r = _resolver(
+        pests={"Thrips": 3},
+        aliases={("pest", "leafminers"): 0},  # seen, undecided
+    )
+    assert r.pest("Leafminers") is None, "0 is a placeholder, not a pest id"
+    assert r.pest("Thrips") == 3
+
+
+def test_placeholder_alias_does_not_break_greenhouses_or_varieties():
+    """Neither is auto-created on ingest, so this is the path still exposed."""
+    r = _resolver(
+        greenhouses={"Greenhouse 01": 7},
+        varieties={"RED": (1, "RED")},
+        aliases={("greenhouse", "packhouse"): 0, ("variety", "mystery"): 0},
+    )
+    assert r.greenhouse("Packhouse") is None
+    variety_id, code = r.variety("Mystery")
+    assert variety_id is None
+    # The code is still carried on the record, so nothing is lost.
+    assert code == "Mystery"
+
+
+def test_a_real_alias_still_resolves():
+    r = _resolver(pests={"Spider Mites": 1}, aliases={("pest", "redspidermites"): 1})
+    assert r.pest("Redspider mites") == 1

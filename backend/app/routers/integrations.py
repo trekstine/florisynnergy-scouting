@@ -17,6 +17,8 @@ attributed to a person, not to "the integration".
 """
 from __future__ import annotations
 
+import logging
+
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -60,6 +62,8 @@ from ..services.matching import ReferenceResolver, Resolution, normalise
 from ..services.recommendations import evaluate_entry, evaluate_outcome
 
 router = APIRouter(prefix="/integrations/blooms", tags=["integrations"])
+
+log = logging.getLogger("uvicorn.error")
 
 SOURCE = "blooms"
 
@@ -142,6 +146,73 @@ async def _scout(db: AsyncSession, name: str | None) -> Employee | None:
     return emp
 
 
+async def _ensure_agents(
+    db: AsyncSession, payload: BloomsSession, scouting_for: str
+) -> list[str]:
+    """Create a pest or disease row for any name the portal does not know.
+
+    Returns the names created, so the caller knows to reload the resolver.
+
+    Marked ``is_provisional``: the row exists, so the observation is filterable,
+    chartable and countable from the moment it lands — but it carries no
+    agronomist-set threshold, so it does not raise recommendations. That
+    division matters. Inventing a threshold would either flood the board with
+    false alarms or, worse, sit quietly below a real infestation.
+
+    Trap and lure rounds are excluded. Those record a catch count against a
+    monitored flier, and the free-text field on them is often a trap id or a
+    note rather than an organism — creating pests from it would fill the
+    register with rubbish.
+    """
+    if scouting_for in ("lure", "sticky_trap"):
+        return []
+
+    wanted: list[str] = []
+    for item in payload.items:
+        name = _clean(item.disease if scouting_for == "disease" else item.pest)
+        if not name:
+            # A pest round with the name only in the disease field, or the
+            # reverse — the app's two fields are not always filled the way the
+            # round type implies.
+            name = _clean(item.pest if scouting_for == "disease" else item.disease)
+        if name and name not in wanted:
+            wanted.append(name)
+    if not wanted:
+        return []
+
+    model = Disease if scouting_for == "disease" else Pest
+    kind = "disease" if scouting_for == "disease" else "pest"
+    resolver = await ReferenceResolver.load(db)
+    lookup = resolver.disease if scouting_for == "disease" else resolver.pest
+
+    created: list[str] = []
+    for name in wanted:
+        if lookup(name) is not None:
+            continue
+        row = model(name=name[:150], is_provisional=True)
+        if model is Pest:
+            row.category = "Unclassified"
+        db.add(row)
+        try:
+            # Nested, so a name that races another request — or collides with a
+            # row differing only in case — costs this one name, not the round.
+            async with db.begin_nested():
+                await db.flush()
+        except IntegrityError:
+            continue
+        created.append(name)
+        log.info(
+            "Blooms sent an unknown %s %r; created it as provisional (id %s). "
+            "It will not raise recommendations until a threshold is set.",
+            kind,
+            name,
+            row.id,
+        )
+    if created:
+        await db.flush()
+    return created
+
+
 async def _note_unmatched(db: AsyncSession, res: Resolution) -> None:
     """Record names that could not be placed, so they can be mapped once.
 
@@ -188,6 +259,14 @@ async def ingest_session(
         res.miss("greenhouse", _clean(payload.location) or "")
 
     scout = await _scout(db, payload.scout)
+    # Any organism the app named that the portal has no row for gets one now,
+    # before the items are translated. Storing the record with a null pest was
+    # the stopgap, and it cost the manager the observation entirely: no filter,
+    # no matrix, no pressure, no recommendation — just a line in a note.
+    created_agents = await _ensure_agents(db, payload, scouting_for)
+    if created_agents:
+        resolver = await ReferenceResolver.load(db)
+
     batch_id = str(uuid.uuid4())
     recorded_at = payload.recorded_at or datetime.now(timezone.utc)
     comments = _clean(payload.comments)

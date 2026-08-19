@@ -21,6 +21,7 @@ from .models import (
     Farm,
     Fertiliser,
     Greenhouse,
+    IntegrationAlias,
     Pest,
     Recommendation,
     ScoutingRecord,
@@ -210,6 +211,78 @@ async def seed_fertilisers(db: AsyncSession) -> int:
     return added
 
 
+async def seed_reference_agents(db: AsyncSession) -> tuple[int, int]:
+    """Bring the pest and disease register up to what the scouting app offers.
+
+    Returns (rows added, aliases added).
+
+    Runs on every boot and only ever adds, so an existing deployment gains the
+    missing organisms without a reseed and without disturbing thresholds
+    somebody has tuned. The alias rows are what stop "White flies" and "FCM"
+    arriving as new pests alongside the ones they mean.
+    """
+    from .reference_data import DISEASES, PESTS, TUNED
+
+    added = aliases = 0
+
+    async def _alias(kind: str, spelling: str, target_id: int) -> None:
+        nonlocal aliases
+        row = (
+            await db.execute(
+                select(IntegrationAlias).where(
+                    IntegrationAlias.kind == kind,
+                    IntegrationAlias.alias == spelling,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            db.add(
+                IntegrationAlias(
+                    kind=kind, alias=spelling, target_id=target_id, source="blooms"
+                )
+            )
+            aliases += 1
+        elif not row.target_id:
+            # Previously seen and left unmapped — this is the mapping it was
+            # waiting for, and applying it retrospectively is the whole point
+            # of having recorded it.
+            row.target_id = target_id
+
+    have_pests = {
+        p.name: p for p in (await db.execute(select(Pest))).scalars()
+    }
+    for name, category, alias_list in PESTS:
+        row = have_pests.get(name)
+        if row is None:
+            row = Pest(
+                name=name,
+                category=category,
+                is_provisional=name not in TUNED,
+            )
+            db.add(row)
+            await db.flush()
+            added += 1
+        for spelling in alias_list:
+            await _alias("pest", spelling, row.id)
+
+    have_diseases = {
+        d.name: d for d in (await db.execute(select(Disease))).scalars()
+    }
+    for name, alias_list in DISEASES:
+        row = have_diseases.get(name)
+        if row is None:
+            row = Disease(name=name, is_provisional=name not in TUNED)
+            db.add(row)
+            await db.flush()
+            added += 1
+        for spelling in alias_list:
+            await _alias("disease", spelling, row.id)
+
+    if added or aliases:
+        await db.commit()
+    return added, aliases
+
+
 async def seed_if_empty(db: AsyncSession) -> bool:
     if (await db.execute(select(func.count()).select_from(Farm))).scalar_one():
         return False
@@ -254,13 +327,31 @@ async def seed_if_empty(db: AsyncSession) -> bool:
             )
 
     varieties = [Variety(code=c, name=n, color=col) for c, n, col in VARIETIES]
-    pests = [
-        Pest(name=n, category=cat, threshold=t, pressure_threshold=pt)
-        for n, cat, t, pt in PESTS
-    ]
-    diseases = [
-        Disease(name=n, threshold=t, pressure_threshold=pt) for n, t, pt in DISEASES
-    ]
+
+    # The reference register is seeded on every boot, before this runs, so the
+    # tuned agents may already exist. Take the existing row and set the tuned
+    # threshold on it rather than inserting a second one — `name` is unique,
+    # and a blind insert here collided with the register.
+    have_pests = {p.name: p for p in (await db.execute(select(Pest))).scalars()}
+    have_diseases = {d.name: d for d in (await db.execute(select(Disease))).scalars()}
+
+    pests = []
+    for n, cat, t, pt in PESTS:
+        row = have_pests.get(n)
+        if row is None:
+            row = Pest(name=n, category=cat)
+        row.category, row.threshold, row.pressure_threshold = cat, t, pt
+        row.is_provisional = False  # these are the deliberately chosen figures
+        pests.append(row)
+
+    diseases = []
+    for n, t, pt in DISEASES:
+        row = have_diseases.get(n)
+        if row is None:
+            row = Disease(name=n)
+        row.threshold, row.pressure_threshold = t, pt
+        row.is_provisional = False
+        diseases.append(row)
     chemicals = [
         Chemical(
             name=name,

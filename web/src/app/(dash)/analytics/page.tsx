@@ -50,6 +50,9 @@ import {
 import {
   useAgentTrend,
   useBreakdown,
+  useFertigationCost,
+  useFertigationUsage,
+  useFertigationWater,
   useDiseases,
   useEmployees,
   useGreenhouses,
@@ -80,9 +83,12 @@ const TABS = [
   { id: "gh-cost", group: "Spray", label: "Cost by greenhouse", blurb: "Where the highest spray costs are going." },
   { id: "chemicals", group: "Spray", label: "Cost by chemical", blurb: "Where the chemical budget goes, and how much product it buys." },
   { id: "variety-cost", group: "Spray", label: "Cost by variety", blurb: "Which varieties are driving spray spend." },
+  { id: "fert-cost", group: "Fertigation", label: "Cost", blurb: "What feeding costs, by phase, block or month." },
+  { id: "fert-water", group: "Fertigation", label: "Water applied", blurb: "Water on each sheet against the rate it planned for — where the farm is over- or under-feeding." },
+  { id: "fert-usage", group: "Fertigation", label: "Fertiliser usage", blurb: "How much of each product left the store, for reconciliation and ordering." },
 ] as const;
 
-const TAB_GROUPS = ["Scouting", "Spray"] as const;
+const TAB_GROUPS = ["Scouting", "Spray", "Fertigation"] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
@@ -163,6 +169,7 @@ export default function AnalyticsPage() {
   const [filters, setFilters] = useState<Filters>(defaultFilters(30));
   const [recordSearch, setRecordSearch] = useState("");
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [fertGroup, setFertGroup] = useState("phase");
 
   const summary = useSummary(filters);
   const trend = useTrend(filters);
@@ -190,6 +197,13 @@ export default function AnalyticsPage() {
     limit: 1000,
   });
   const spray = useSpray();
+
+  // Fertigation aggregates, computed server-side from the sheets as raised —
+  // each line carries the price that applied on the day, so a repriced
+  // fertiliser cannot restate what last month's feeding cost.
+  const fertCost = useFertigationCost(fertGroup, filters);
+  const fertWater = useFertigationWater(filters);
+  const fertUsage = useFertigationUsage(filters);
 
   const ghName = useMemo(() => {
     const m = new Map<number, string>();
@@ -1620,6 +1634,265 @@ export default function AnalyticsPage() {
           </Card>
         </div>
       )}
+
+      {activeTab === "fert-cost" && (
+        <div className="space-y-5 px-6">
+          <PlaceholderPriceNote />
+          <Card>
+            <CardHeader
+              title="Fertigation cost"
+              subtitle="Grouped by where the feeding went. Costs use the prices stored on each sheet when it was raised."
+              actions={
+                <div className="inline-flex rounded-lg border border-line bg-white p-0.5">
+                  {[
+                    { id: "phase", label: "By phase" },
+                    { id: "block", label: "By block" },
+                    { id: "month", label: "By month" },
+                    { id: "activity", label: "By activity" },
+                  ].map((g) => (
+                    <button
+                      key={g.id}
+                      onClick={() => setFertGroup(g.id)}
+                      className={clsx(
+                        "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
+                        fertGroup === g.id
+                          ? "bg-brand-600 text-white"
+                          : "text-ink-soft hover:bg-surface",
+                      )}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
+              }
+            />
+            <div className="p-4">
+              {fertCost.isLoading && <Spinner />}
+              {!fertCost.isLoading && (fertCost.data ?? []).length === 0 && (
+                <EmptyState>No fertigation sheets in this date range.</EmptyState>
+              )}
+              {(fertCost.data ?? []).length > 0 && (
+                <>
+                  <RankedBarChart
+                    data={(fertCost.data ?? [])
+                      .slice(0, 12)
+                      .map((r) => ({ label: r.key, value: r.total_cost }))}
+                    color="#0891b2"
+                    height={300}
+                    seriesLabel="Feeding spend"
+                    format="money"
+                  />
+                  <div className="mt-4 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
+                          <th className="py-2 pr-3 font-semibold">
+                            {fertGroup === "month" ? "Month" : fertGroup === "block" ? "Block" : fertGroup === "activity" ? "Activity" : "Phase"}
+                          </th>
+                          <th className="py-2 pr-3 text-right font-semibold">Sheets</th>
+                          <th className="py-2 pr-3 text-right font-semibold">Water m³</th>
+                          <th className="py-2 pr-3 text-right font-semibold">Area ha</th>
+                          <th className="py-2 pr-3 text-right font-semibold">m³/ha</th>
+                          <th className="py-2 text-right font-semibold">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line">
+                        {(fertCost.data ?? []).map((r) => (
+                          <tr key={r.key} className="hover:bg-surface">
+                            <td className="py-2 pr-3 font-medium text-ink">{r.key}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">{r.sheets}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">{r.volume_m3.toLocaleString()}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">{r.area_ha || "—"}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">{r.m3_per_ha ?? "—"}</td>
+                            <td className="py-2 text-right font-semibold tabular-nums text-ink">{money(r.total_cost)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {fertGroup === "block" && (
+                    <p className="mt-3 border-t border-line pt-3 text-xs text-ink-faint">
+                      A sheet covering several greenhouses is one cost shared
+                      between them, apportioned by area — not counted once per
+                      block. The block totals therefore add up to the farm total.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {activeTab === "fert-water" && (
+        <div className="space-y-5 px-6">
+          <Card>
+            <CardHeader
+              title="Water applied against plan"
+              subtitle="Each sheet's m³/ha next to the target it was raised for. Negative variance is underfeeding."
+            />
+            <div className="overflow-auto p-4">
+              {fertWater.isLoading && <Spinner />}
+              {!fertWater.isLoading && (fertWater.data ?? []).length === 0 && (
+                <EmptyState>No fertigation sheets in this date range.</EmptyState>
+              )}
+              {(fertWater.data ?? []).length > 0 && (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
+                      <th className="py-2 pr-3 font-semibold">Date</th>
+                      <th className="py-2 pr-3 font-semibold">Phase</th>
+                      <th className="py-2 pr-3 font-semibold">Blocks</th>
+                      <th className="py-2 pr-3 text-right font-semibold">Area ha</th>
+                      <th className="py-2 pr-3 text-right font-semibold">Water m³</th>
+                      <th className="py-2 pr-3 text-right font-semibold">m³/ha</th>
+                      <th className="py-2 pr-3 text-right font-semibold">Target m³/ha</th>
+                      <th className="py-2 pr-3 text-right font-semibold">Variance</th>
+                      <th className="py-2 text-right font-semibold">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {(fertWater.data ?? []).map((r) => (
+                      <tr key={r.doc_id} className="hover:bg-surface">
+                        <td className="whitespace-nowrap py-2 pr-3">
+                          <Link
+                            href={`/fertigation/${encodeURIComponent(r.doc_id)}`}
+                            className="font-medium text-brand-700 hover:underline"
+                          >
+                            {new Date(r.event_date).toLocaleDateString("en-GB", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </Link>
+                        </td>
+                        <td className="py-2 pr-3 text-ink-soft">{r.phase ?? "—"}</td>
+                        <td className="max-w-[16rem] truncate py-2 pr-3 text-ink-soft" title={r.blocks ?? ""}>
+                          {r.blocks ?? "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">{r.area_ha ?? "—"}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">
+                          {r.volume_m3?.toLocaleString() ?? "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-right font-semibold tabular-nums text-ink">
+                          {r.m3_per_ha ?? "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">
+                          {r.target_m3_per_ha ?? "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {r.variance_pct == null ? (
+                            <span className="text-ink-faint">no target set</span>
+                          ) : (
+                            <span
+                              className={clsx(
+                                "font-semibold",
+                                Math.abs(r.variance_pct) < 5
+                                  ? "text-emerald-700"
+                                  : Math.abs(r.variance_pct) < 15
+                                    ? "text-amber-700"
+                                    : "text-red-700",
+                              )}
+                            >
+                              {r.variance_pct > 0 ? "+" : ""}
+                              {r.variance_pct}%
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 text-right tabular-nums text-ink-soft">{money(r.total_cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <p className="mt-3 border-t border-line pt-3 text-xs text-ink-faint">
+                A sheet with no target rate has nothing to be measured against,
+                so its variance is blank rather than zero — a blank is missing
+                information, and zero would read as on-plan.
+              </p>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {activeTab === "fert-usage" && (
+        <div className="space-y-5 px-6">
+          <PlaceholderPriceNote />
+          <Card>
+            <CardHeader
+              title="Fertiliser usage"
+              subtitle="Quantity × the sets actually made up, summed across every sheet in range."
+            />
+            <div className="p-4">
+              {fertUsage.isLoading && <Spinner />}
+              {!fertUsage.isLoading && (fertUsage.data ?? []).length === 0 && (
+                <EmptyState>No fertiliser issued in this date range.</EmptyState>
+              )}
+              {(fertUsage.data ?? []).length > 0 && (
+                <>
+                  <RankedBarChart
+                    data={(fertUsage.data ?? [])
+                      .slice(0, 12)
+                      .map((r) => ({ label: r.code, value: r.total_cost }))}
+                    color="#7c3aed"
+                    height={300}
+                    seriesLabel="Product spend"
+                    format="money"
+                  />
+                  <div className="mt-4 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
+                          <th className="py-2 pr-3 font-semibold">Code</th>
+                          <th className="py-2 pr-3 font-semibold">Product</th>
+                          <th className="py-2 pr-3 text-right font-semibold">Quantity</th>
+                          <th className="py-2 pr-3 text-right font-semibold">Sheets</th>
+                          <th className="py-2 text-right font-semibold">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line">
+                        {(fertUsage.data ?? []).map((r) => (
+                          <tr key={r.code} className="hover:bg-surface">
+                            <td className="py-2 pr-3 font-semibold text-ink">{r.code}</td>
+                            <td className="py-2 pr-3 text-ink-soft">{r.name ?? "—"}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums text-ink">
+                              {r.quantity.toLocaleString()} {r.unit}
+                            </td>
+                            <td className="py-2 pr-3 text-right tabular-nums text-ink-soft">{r.sheets}</td>
+                            <td className="py-2 text-right font-semibold tabular-nums text-ink">
+                              {money(r.total_cost)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Says out loud that the money on screen is not the farm's money yet.
+ *
+ * The fertiliser register ships with indicative prices, not invoices. A cost
+ * report that looks authoritative while resting on invented figures is worse
+ * than no report — somebody will budget against it.
+ */
+function PlaceholderPriceNote() {
+  return (
+    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+      <span>
+        <strong>Costs are indicative.</strong> The fertiliser register still
+        carries placeholder prices. Enter your invoice prices under Settings →
+        Fertilisers and every figure here becomes real.
+      </span>
     </div>
   );
 }

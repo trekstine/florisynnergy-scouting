@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 
 import {
   FilterBar,
+  RANGES_WITH_TODAY,
   defaultFilters,
   isoDaysAgo,
 } from "@/components/FilterBar";
@@ -55,13 +56,8 @@ import {
 } from "@/lib/hooks";
 import type { Filters, Recommendation, ScoutingRecord } from "@/lib/types";
 
-/** Records list gets a "Today" preset the analytics ranges don't offer. */
-const RANGES = [
-  { days: 1, label: "Today" },
-  { days: 7, label: "7d" },
-  { days: 30, label: "30d" },
-  { days: 90, label: "90d" },
-];
+/** Shared with the dashboard, so "Today" means the same thing on both. */
+const RANGES = RANGES_WITH_TODAY;
 
 const RANGE_NOUN: Record<number, string> = {
   1: "today",

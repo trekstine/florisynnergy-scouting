@@ -1337,3 +1337,54 @@ class FertigationOut(BaseModel):
     # "m³ used = 33.33 × greenhouse area", summed.
     planned_m3: float | None = None
     signature_count: int = 0
+
+
+# ───────── Fertigation analytics ─────────
+class FertigationCostRow(BaseModel):
+    """Feeding cost and water, grouped one way or another.
+
+    ``key`` is whatever the grouping is — a phase name, a block name, a month.
+    Costs carry the prices stored on the sheet at the time it was raised, not
+    today's, so a repriced fertiliser cannot restate last season's spend.
+    """
+
+    key: str
+    sheets: int
+    volume_m3: float
+    area_ha: float
+    m3_per_ha: float | None = None
+    total_cost: float
+
+
+class FertigationUsageRow(BaseModel):
+    """How much of one product went out, across every sheet in range."""
+
+    code: str
+    name: str | None = None
+    unit: str
+    quantity: float
+    tanks: int
+    sheets: int
+    total_cost: float
+
+
+class FertigationWaterRow(BaseModel):
+    """Water applied against the rate that was planned, per sheet.
+
+    ``target_m3_per_ha`` is what the sheet asked for and ``m3_per_ha`` what the
+    volume and area actually work out to. The gap between them is the point of
+    the row — a phase consistently under its target is a phase being underfed.
+    """
+
+    doc_id: str
+    reference: str | None = None
+    event_date: date
+    phase: str | None = None
+    blocks: str | None = None
+    area_ha: float | None = None
+    volume_m3: float | None = None
+    m3_per_ha: float | None = None
+    target_m3_per_ha: float | None = None
+    variance_pct: float | None = None
+    total_cost: float
+    status: str

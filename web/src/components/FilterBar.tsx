@@ -19,6 +19,17 @@ const DEFAULT_RANGES: { label: string; days: number }[] = [
   { label: "90d", days: 90 },
 ];
 
+/**
+ * Presets for the screens a manager opens to ask "what happened today".
+ *
+ * `days: 1` really does mean today only — `isoDaysAgo` subtracts `days - 1`,
+ * so the window starts this morning rather than yesterday's.
+ */
+export const RANGES_WITH_TODAY: { label: string; days: number }[] = [
+  { label: "Today", days: 1 },
+  ...DEFAULT_RANGES,
+];
+
 export function isoDaysAgo(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - (days - 1));

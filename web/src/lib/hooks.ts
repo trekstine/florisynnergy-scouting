@@ -38,6 +38,9 @@ import type {
   ScoutSummary,
   SeverityBucket,
   SprayAttachment,
+  FertigationCostRow,
+  FertigationUsageRow,
+  FertigationWaterRow,
   SprayCostRow,
   SprayPreview,
   SprayProgramResult,
@@ -562,6 +565,43 @@ export const useScoutSummary = (f: Filters = {}) =>
   useQuery({ queryKey: ["scouts", fkey(f)], queryFn: () => api.get<ScoutSummary[]>(`${V1}/analytics/scouts${filterQS(f)}`) });
 export const useSprayCost = () =>
   useQuery({ queryKey: ["spray-cost"], queryFn: () => api.get<SprayCostRow[]>(`${V1}/analytics/spray-cost`) });
+
+/**
+ * Fertigation aggregates. The date range is passed through so these honour the
+ * same filter bar as every other report on the page — a cost figure that
+ * ignores the selected period would be read as the period's cost.
+ */
+function fertQS(f: Filters, extra: Record<string, string | undefined> = {}): string {
+  const p = new URLSearchParams();
+  if (f.start) p.set("start", f.start);
+  if (f.end) p.set("end", f.end);
+  for (const [k, v] of Object.entries(extra)) if (v) p.set(k, v);
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export const useFertigationCost = (group: string, f: Filters = {}) =>
+  useQuery({
+    queryKey: ["fert-cost", group, fkey(f)],
+    queryFn: () =>
+      api.get<FertigationCostRow[]>(
+        `${V1}/analytics/fertigation/cost${fertQS(f, { group })}`,
+      ),
+  });
+
+export const useFertigationUsage = (f: Filters = {}) =>
+  useQuery({
+    queryKey: ["fert-usage", fkey(f)],
+    queryFn: () =>
+      api.get<FertigationUsageRow[]>(`${V1}/analytics/fertigation/usage${fertQS(f)}`),
+  });
+
+export const useFertigationWater = (f: Filters = {}) =>
+  useQuery({
+    queryKey: ["fert-water", fkey(f)],
+    queryFn: () =>
+      api.get<FertigationWaterRow[]>(`${V1}/analytics/fertigation/water${fertQS(f)}`),
+  });
 
 // ── Recommendations ──
 export const useRecommendations = (status?: string) => {

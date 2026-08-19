@@ -332,3 +332,96 @@ async def test_fertigation_client_record_ids_stay_unique(client, auth):
     b = await _create_fertigation(client, auth)
     assert a["doc_id"] != b["doc_id"]
     assert uuid.UUID(a["doc_id"]) and uuid.UUID(b["doc_id"])
+
+
+# ─────────────────────── fertigation analytics ───────────────────────────────
+async def test_fertigation_cost_by_block_does_not_multiply_the_bill(client, auth):
+    """A sheet feeding two blocks is one cost shared, not two costs.
+
+    Grouping by block is the obvious way to answer "where is the money going",
+    and the obvious implementation counts the whole sheet against every block
+    it touched — which reports a farm's feeding bill at several times its real
+    size. The block totals must add back up to the sheet total.
+    """
+    created = await _create_fertigation(client, auth)  # blocks 1 and 2
+    doc_id = created["doc_id"]
+    sheet_cost = created["total_cost"]
+    assert sheet_cost > 0, "the seeded fertiliser needs a price for this to mean anything"
+
+    rows = (
+        await client.get(
+            f"{V1}/analytics/fertigation/cost", params={"group": "block"}, headers=auth
+        )
+    ).json()
+    by_block = {r["key"]: r for r in rows}
+    assert len(by_block) >= 2
+
+    total = sum(r["total_cost"] for r in rows)
+    phase_rows = (
+        await client.get(
+            f"{V1}/analytics/fertigation/cost", params={"group": "phase"}, headers=auth
+        )
+    ).json()
+    phase_total = sum(r["total_cost"] for r in phase_rows)
+    # Apportioning is lossy to the penny; anything beyond that is double count.
+    assert abs(total - phase_total) < 1.0, (total, phase_total)
+
+    await client.delete(f"{V1}/fertigation/{doc_id}", headers=auth)
+
+
+async def test_fertigation_water_reports_variance_against_target(client, auth):
+    body = await _fertigation_payload(client, auth)
+    body["target_m3_per_ha"] = 30
+    body["area_ha"] = 40          # 1000 m³ over 40 ha is 25 m³/ha
+    resp = await client.post(f"{V1}/fertigation", json=body, headers=auth)
+    assert resp.status_code == 201, resp.text
+    doc_id = resp.json()["doc_id"]
+
+    rows = (await client.get(f"{V1}/analytics/fertigation/water", headers=auth)).json()
+    mine = next(r for r in rows if r["doc_id"] == doc_id)
+    assert mine["m3_per_ha"] == 25.0
+    assert mine["target_m3_per_ha"] == 30.0
+    # 25 against 30 is 16.7% short — underfeeding, and it must read negative.
+    assert mine["variance_pct"] == pytest.approx(-16.7, abs=0.1)
+
+    await client.delete(f"{V1}/fertigation/{doc_id}", headers=auth)
+
+
+async def test_fertigation_water_leaves_variance_blank_without_a_target(client, auth):
+    """No target is missing information, not agreement with the plan."""
+    created = await _create_fertigation(client, auth)  # no target_m3_per_ha
+    rows = (await client.get(f"{V1}/analytics/fertigation/water", headers=auth)).json()
+    mine = next(r for r in rows if r["doc_id"] == created["doc_id"])
+    assert mine["variance_pct"] is None
+    await client.delete(f"{V1}/fertigation/{created['doc_id']}", headers=auth)
+
+
+async def test_fertigation_usage_counts_sets_not_just_line_quantity(client, auth):
+    """25 kg in a tank made up six times is 150 kg out of the store.
+
+    Reporting the line quantity alone would understate every order the farm
+    places off the back of this table.
+    """
+    created = await _create_fertigation(client, auth)
+    tank = created["tanks"][0]
+    sets = tank["effective_sets"]
+    assert sets > 1, "the fixture should imply more than one set"
+
+    rows = (await client.get(f"{V1}/analytics/fertigation/usage", headers=auth)).json()
+    line = tank["lines"][0]
+    mine = next(r for r in rows if r["code"] == line["fertiliser_code"])
+    assert mine["quantity"] >= line["quantity"] * sets - 0.01
+
+    await client.delete(f"{V1}/fertigation/{created['doc_id']}", headers=auth)
+
+
+async def test_fertigation_analytics_honour_the_date_range(client, auth):
+    created = await _create_fertigation(client, auth)
+    far_past = {"start": "2000-01-01", "end": "2000-12-31"}
+    rows = (
+        await client.get(
+            f"{V1}/analytics/fertigation/water", params=far_past, headers=auth
+        )
+    ).json()
+    assert all(r["doc_id"] != created["doc_id"] for r in rows)
+    await client.delete(f"{V1}/fertigation/{created['doc_id']}", headers=auth)

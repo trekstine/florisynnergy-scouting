@@ -1,29 +1,63 @@
 "use client";
 
-import { ClipboardList } from "lucide-react";
+import { CalendarOff, ClipboardList } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { RoundDrawer } from "@/components/RoundDrawer";
+import { formatDate } from "@/lib/format";
 import { useRounds } from "@/lib/hooks";
 import type { RoundSummary } from "@/lib/types";
 
+/** What the block's scouting history has to say about a given date. */
+export interface RoundMatch {
+  /** The round walked on the report date itself, if there is one. */
+  exact: RoundSummary | null;
+  /** The most recent round *before* that date — a fallback, never a substitute. */
+  nearest: RoundSummary | null;
+  /** The date we were looking for, or null if the programme carries none. */
+  wanted: string | null;
+}
+
 /**
- * Resolve a spray program back to the scouting round that justified it.
+ * Match a spray programme to the scouting round that justified it.
  *
- * A program carries the block and the scout report date, not a batch id, so
- * the round has to be matched: the walk of that block on the report date, or
- * failing that the last walk before it. Without this the trail ended at an
- * unfiltered list of every observation on the farm, which answers nothing.
+ * A programme carries the block and the scout report date, not a batch id, so
+ * the round has to be found. The rule that matters is what happens when there
+ * is no round on that date, and the old one was wrong twice over: it quietly
+ * opened the nearest earlier round, and — when the programme had no report date
+ * at all — the *newest* round on the block, which could be weeks after the
+ * spray. Either way the manager was reading one day's findings while believing
+ * they were another's, with nothing on screen to say so.
+ *
+ * So this returns both answers and refuses to choose between them. An exact
+ * match opens directly; anything else is offered by name, with its date, for
+ * the reader to accept deliberately.
  */
-export function pickRound(rounds: RoundSummary[], reportDate: string | null): RoundSummary | null {
-  if (!rounds.length) return null;
-  if (!reportDate) return rounds[0]!; // already newest-first
-  const day = reportDate.slice(0, 10);
-  const exact = rounds.find((r) => r.started_at.slice(0, 10) === day);
-  if (exact) return exact;
-  const before = rounds.filter((r) => r.started_at.slice(0, 10) <= day);
-  return before[0] ?? null;
+export function matchRound(
+  rounds: RoundSummary[],
+  reportDate: string | null,
+): RoundMatch {
+  const wanted = reportDate ? reportDate.slice(0, 10) : null;
+  if (!rounds.length) return { exact: null, nearest: null, wanted };
+
+  // No date on the programme is a gap in the record, not licence to guess.
+  // Without one there is no "nearest" to speak of either — the newest round on
+  // the block is not evidence for a spray of unknown date.
+  if (!wanted) return { exact: null, nearest: null, wanted: null };
+
+  const onDay = rounds.filter((r) => r.started_at.slice(0, 10) === wanted);
+  if (onDay.length) {
+    // Several walks in one day: the last one is what the programme was written
+    // against, since the programme was raised after them.
+    const exact = onDay.reduce((a, b) => (a.started_at >= b.started_at ? a : b));
+    return { exact, nearest: null, wanted };
+  }
+
+  const before = rounds
+    .filter((r) => r.started_at.slice(0, 10) < wanted)
+    .sort((a, b) => b.started_at.localeCompare(a.started_at));
+  return { exact: null, nearest: before[0] ?? null, wanted };
 }
 
 export function ScoutingBehindLink({
@@ -37,43 +71,72 @@ export function ScoutingBehindLink({
   className?: string;
   label?: string;
 }) {
-  const q = useRounds(greenhouseId != null ? { greenhouse_id: greenhouseId, limit: 100 } : null);
-  const round = useMemo(() => pickRound(q.data ?? [], reportDate), [q.data, reportDate]);
-  const [open, setOpen] = useState(false);
+  const q = useRounds(
+    greenhouseId != null ? { greenhouse_id: greenhouseId, limit: 100 } : null,
+  );
+  const match = useMemo(() => matchRound(q.data ?? [], reportDate), [q.data, reportDate]);
+  const [open, setOpen] = useState<string | null>(null);
 
   if (greenhouseId == null) return null;
 
   // Checking the scouting behind a spray is a glance, not a destination — it
-  // opens over the program rather than navigating away from it, so the tank
+  // opens over the programme rather than navigating away from it, so the tank
   // mix, the filters and the scroll position all survive the trip.
-  if (round) {
+  const openDrawer = (e: React.MouseEvent, batchId: string) => {
+    // The analytics table toggles a programme on row click; opening the drawer
+    // must not also collapse the row underneath it.
+    e.stopPropagation();
+    setOpen(batchId);
+  };
+
+  if (match.exact) {
     return (
       <>
-        <button
-          type="button"
-          onClick={(e) => {
-            // The analytics table toggles a program on row click; opening the
-            // drawer must not also collapse the row underneath it.
-            e.stopPropagation();
-            setOpen(true);
-          }}
-          className={className}
-        >
+        <button type="button" onClick={(e) => openDrawer(e, match.exact!.batch_id)} className={className}>
           <ClipboardList size={13} /> {label}
         </button>
-        <RoundDrawer
-          batchId={open ? round.batch_id : null}
-          onClose={() => setOpen(false)}
-        />
+        <RoundDrawer batchId={open} onClose={() => setOpen(null)} />
       </>
     );
   }
 
-  // No round resolved yet: the reports list filtered to this block is still
-  // the right place, just one click further from the answer.
+  // No round on the day. Say so, and name the date of the nearest one before
+  // opening it — the reader decides whether an older walk is evidence.
+  if (match.nearest) {
+    const day = formatDate(match.nearest.started_at);
+    return (
+      <>
+        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-faint">
+          <CalendarOff size={12} className="shrink-0" />
+          <span>
+            No scouting on{" "}
+            {match.wanted ? formatDate(match.wanted) : "the report date"}.
+          </span>
+          <button
+            type="button"
+            onClick={(e) => openDrawer(e, match.nearest!.batch_id)}
+            className="font-semibold text-brand-700 hover:underline"
+          >
+            Open the round of {day}
+          </button>
+        </span>
+        <RoundDrawer batchId={open} onClose={() => setOpen(null)} />
+      </>
+    );
+  }
+
+  // Nothing to point at — either the programme carries no report date, or the
+  // block has no earlier round. The filtered list is the honest destination.
   return (
-    <Link href={`/scouting/rounds?greenhouse=${greenhouseId}`} className={className}>
-      <ClipboardList size={13} /> {label}
+    <Link
+      href={`/scouting/rounds?greenhouse=${greenhouseId}`}
+      className="flex items-center gap-1 text-xs font-semibold text-ink-faint hover:text-brand-700 hover:underline"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <ClipboardList size={13} />
+      {match.wanted
+        ? `No scouting on or before ${formatDate(match.wanted)} — see all rounds`
+        : "No report date on this program — see all rounds"}
     </Link>
   );
 }

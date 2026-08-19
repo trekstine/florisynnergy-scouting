@@ -202,6 +202,10 @@ class Pest(Base):
     # A block-wide measure — distinct from `threshold`, which is per observation.
     pressure_threshold: Mapped[float] = mapped_column(Float, default=0.5)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # True until an agronomist has set a real threshold. Provisional agents are
+    # recorded, filtered and charted like any other — they just do not raise
+    # recommendations, because the number that would trigger one is a guess.
+    is_provisional: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class Disease(Base):
@@ -212,6 +216,8 @@ class Disease(Base):
     threshold: Mapped[int] = mapped_column(Integer, default=3)
     pressure_threshold: Mapped[float] = mapped_column(Float, default=0.5)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # See Pest.is_provisional.
+    is_provisional: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class Chemical(Base):

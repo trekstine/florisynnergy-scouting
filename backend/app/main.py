@@ -26,7 +26,7 @@ from .routers import (
     scouting,
     spray,
 )
-from .seed import seed_fertilisers, seed_if_empty
+from .seed import seed_fertilisers, seed_if_empty, seed_reference_agents
 
 settings = get_settings()
 
@@ -78,6 +78,17 @@ async def lifespan(_: FastAPI):
     # deployment should gain it on the next boot without a reseed.
     async with AsyncSessionLocal() as db:
         await seed_fertilisers(db)
+        # Likewise the pest and disease register: the scouting app can report
+        # organisms the portal had no row for, and a record pointing at nothing
+        # is a record the manager never sees. Additive, so tuned thresholds are
+        # left alone.
+        agents, aliases = await seed_reference_agents(db)
+        if agents or aliases:
+            logging.getLogger("uvicorn.error").info(
+                "Reference register: added %d pest/disease row(s) and %d alias(es).",
+                agents,
+                aliases,
+            )
 
     if settings.seed_on_startup:
         async with AsyncSessionLocal() as db:

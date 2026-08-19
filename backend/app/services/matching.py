@@ -117,7 +117,11 @@ class ReferenceResolver:
             return None
         for v in _variants(text):
             hit = self._aliases.get((kind, v))
-            if hit is not None:
+            # `target_id = 0` is the placeholder for "seen, not yet mapped".
+            # It is not a row id, and returning it wrote 0 into a foreign key:
+            # the first submission of an unknown pest recorded the placeholder,
+            # and every submission after that failed on the constraint.
+            if hit:
                 return hit
             hit = table.get(v)
             if hit is not None:
@@ -146,7 +150,7 @@ class ReferenceResolver:
             return None, None
         for v in _variants(text):
             alias = self._aliases.get(("variety", v))
-            if alias is not None:
+            if alias:  # 0 means "seen, not yet mapped" — see `_lookup`
                 return alias, text.strip()
             hit = self._varieties.get(v)
             if hit is not None:
