@@ -3,7 +3,6 @@
 import {
   AlertTriangle,
   ArrowLeft,
-  Beaker,
   Droplets,
   FileCheck2,
   Lock,
@@ -110,19 +109,29 @@ export default function FertigationDetailPage() {
       <div className="grid grid-cols-2 gap-3 px-6 lg:grid-cols-5">
         {/* Litres is what the meter reads and what the operator writes down;
             m³ is what every rate on the sheet is expressed against. Both. */}
+        {/* The report's chain, in its own order: the litres keyed in, then
+            what they work out to. */}
         <Tile
           icon={<Droplets size={13} />}
-          label="Water"
-          value={
-            f.volume_m3 != null
-              ? `${Math.round(f.volume_m3 * 1000).toLocaleString()} L`
-              : "—"
+          label="Solution"
+          value={f.solution_l != null ? `${f.solution_l.toLocaleString()} L` : "—"}
+          hint={
+            f.solution_l != null
+              ? `${Math.round((f.solution_l / 1000) * 100) / 100} sets`
+              : undefined
           }
-          hint={f.volume_m3 != null ? `${f.volume_m3.toLocaleString()} m³` : undefined}
         />
         <Tile label="Area fed" value={f.area_ha != null ? `${f.area_ha} ha` : "—"} />
-        <Tile label="m³ / ha" value={f.m3_per_ha != null ? String(f.m3_per_ha) : "—"} />
-        <Tile icon={<Beaker size={13} />} label="Stock" value={`${f.stock_required_l} L`} />
+        <Tile
+          label="m³ / ha"
+          value={f.m3_per_ha != null ? String(f.m3_per_ha) : "—"}
+          hint={f.l_per_ha != null ? `${f.l_per_ha} L/ha ÷ ${f.fertiliser_rate_l_m3}` : undefined}
+        />
+        <Tile
+          label="Water"
+          value={f.volume_m3 != null ? `${f.volume_m3.toLocaleString()} m³` : "—"}
+          hint={`litres ÷ ${f.fertiliser_rate_l_m3}`}
+        />
         <Tile icon={<Sprout size={13} />} label="Cost" value={money(f.total_cost)} />
       </div>
 
@@ -148,6 +157,9 @@ export default function FertigationDetailPage() {
             <Detail label="Start time">{f.start_time ?? "—"}</Detail>
             <Detail label="Phase">{f.phase ?? "—"}</Detail>
             <Detail label="Applicator">{f.applicator ?? "—"}</Detail>
+            <Detail label="Litres per hectare">
+              {f.l_per_ha != null ? `${f.l_per_ha} L/ha` : "—"}
+            </Detail>
             <Detail label="Rate applied">
               {f.m3_per_ha != null ? `${f.m3_per_ha} m³/ha` : "—"}
             </Detail>
@@ -193,7 +205,8 @@ export default function FertigationDetailPage() {
                         {b.area_ha ?? "—"}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
-                        {b.volume_m3 ?? "apportioned"}
+                        {/* m³/ha × this block's area, per the report. */}
+                        {b.volume_m3 ?? b.derived_m3 ?? "—"}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
                         {b.m3_per_ha ?? "—"}

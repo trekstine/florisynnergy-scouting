@@ -304,16 +304,21 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
     )
     preparer = await db.get(Employee, row.prepared_by) if row.prepared_by else None
 
-    # Derived once, here, so the list, the detail and the document cannot
-    # disagree about how many sets a tank is making up.
-    stock_l = calc.stock_required_l(row.volume_m3, row.fertiliser_rate_l_m3)
-    acid_l = calc.stock_required_l(row.volume_m3, row.acid_rate_l_m3)
+    # The report's chain, derived once here so the list, the detail and the
+    # document cannot disagree about what a figure means.
+    solution_l = float(row.solution_l or 0)
+    pump = row.fertiliser_rate_l_m3 or calc.PUMP_RATE_L_PER_M3
+    acid_l = calc.acid_required_l(solution_l, pump, row.acid_rate_l_m3)
 
     # BR-001: the area is the sum over the blocks fed, not one block's figure.
     # A stored area_ha still wins where somebody set it deliberately.
     ordered_blocks = sorted(row.blocks, key=lambda b: (b.position, b.name))
     summed_area = calc.selected_area_ha(ordered_blocks)
     area_ha = row.area_ha if row.area_ha is not None else (summed_area or None)
+
+    litres_per_ha = calc.l_per_ha(solution_l, area_ha)
+    rate_m3_ha = calc.m3_per_ha(solution_l, area_ha, pump)
+    total_water_m3 = calc.water_m3(solution_l, pump)
 
     blocks = [
         FertigationBlockOut(
@@ -324,7 +329,10 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
             area_ha=b.area_ha,
             volume_m3=b.volume_m3,
             position=b.position,
-            m3_per_ha=calc.block_m3_per_ha(b, row.volume_m3, summed_area),
+            # "m³ used = 33.33 × (Greenhouse Area in ha)" — the report's own
+            # per-greenhouse figure, from the rate the day worked out to.
+            m3_per_ha=rate_m3_ha,
+            derived_m3=calc.block_m3(rate_m3_ha, b.area_ha),
         )
         for b in ordered_blocks
     ]
@@ -335,7 +343,7 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
 
     tanks = []
     for t in sorted(row.tanks, key=lambda t: t.code):
-        effective = calc.effective_sets(t, stock_l, acid_l)
+        effective = calc.effective_sets(t, solution_l, acid_l)
         tanks.append(
             FertigationTankOut(
                 id=t.id,
@@ -345,7 +353,7 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
                 sets=t.sets,
                 note=t.note,
                 lines=[FertigationLineOut.model_validate(x) for x in t.lines],
-                implied_sets=calc.implied_sets(t, stock_l, acid_l),
+                implied_sets=calc.implied_sets(t, solution_l, acid_l),
                 effective_sets=effective,
                 is_acid_tank=calc.is_acid_tank(t),
                 total_cost=calc.tank_cost(t, effective),
@@ -365,9 +373,11 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
         blocks=blocks,
         blocks_label=blocks_label,
         type_of_application=row.type_of_application,
-        volume_m3=row.volume_m3,
+        solution_l=row.solution_l,
         area_ha=area_ha,
-        target_m3_per_ha=row.target_m3_per_ha,
+        l_per_ha=litres_per_ha,
+        target_m3_per_ha=rate_m3_ha,
+        volume_m3=total_water_m3,
         weather=row.weather,
         fertiliser_rate_l_m3=row.fertiliser_rate_l_m3,
         acid_rate_l_m3=row.acid_rate_l_m3,
@@ -380,14 +390,14 @@ async def _to_out(db: AsyncSession, row: Fertigation) -> FertigationOut:
         created_at=row.created_at,
         tanks=tanks,
         sources=[FertigationSourceOut.model_validate(s) for s in row.sources],
-        total_cost=calc.total_cost(row.tanks, stock_l, acid_l),
-        stock_required_l=stock_l,
+        total_cost=calc.total_cost(row.tanks, solution_l, acid_l),
+        stock_required_l=solution_l,
         acid_required_l=acid_l,
-        m3_per_ha=calc.m3_per_ha(row.volume_m3, area_ha),
+        m3_per_ha=rate_m3_ha,
         sources_total_m3=calc.sources_total_m3(row.sources),
-        source_note=calc.source_mismatch(row.volume_m3, row.sources),
+        source_note=calc.source_mismatch(total_water_m3, row.sources),
         blocks_total_m3=calc.blocks_total_m3(ordered_blocks),
-        block_note=calc.block_mismatch(row.volume_m3, ordered_blocks),
+        block_note=calc.block_mismatch(total_water_m3, ordered_blocks),
         signature_count=await _signature_count(db, row.doc_id),
     )
 
@@ -400,7 +410,7 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
     """
     for field in (
         "activity", "event_date", "start_time", "phase_id",
-        "type_of_application", "volume_m3", "area_ha",
+        "type_of_application", "solution_l", "area_ha",
         "weather", "fertiliser_rate_l_m3", "acid_rate_l_m3", "applicator_id", "comments",
         "status",
     ):
@@ -463,19 +473,20 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
     if payload.area_ha is None:
         row.area_ha = calc.selected_area_ha(row.blocks) or None
 
-    # The rate is what the water came to over that area, computed here rather
-    # than accepted from the caller. It used to be a second editable field
-    # beside the volume, which let a sheet state a rate its own figures did not
-    # support. Stored rather than derived on read, so a signed sheet keeps its
-    # number if a block is re-measured later.
-    row.target_m3_per_ha = calc.applied_rate_m3_per_ha(row.volume_m3, row.area_ha)
+    # The report's chain, derived from the litres and stored. None of these are
+    # accepted from the caller: they describe one fact, and a second editable
+    # copy of a fact is how a sheet ends up disagreeing with itself.
+    pump = row.fertiliser_rate_l_m3 or calc.PUMP_RATE_L_PER_M3
+    row.l_per_ha = calc.l_per_ha(row.solution_l, row.area_ha)
+    row.target_m3_per_ha = calc.m3_per_ha(row.solution_l, row.area_ha, pump)
+    row.volume_m3 = calc.water_m3(row.solution_l, pump)
 
     register = {
         f.id: f for f in (await db.execute(select(Fertiliser))).scalars()
     }
 
-    stock_l = calc.stock_required_l(row.volume_m3, row.fertiliser_rate_l_m3)
-    acid_l = calc.stock_required_l(row.volume_m3, row.acid_rate_l_m3)
+    solution_l = float(row.solution_l or 0)
+    acid_l = calc.acid_required_l(solution_l, pump, row.acid_rate_l_m3)
 
     for tank_in in payload.tanks:
         tank = FertigationTank(
@@ -502,7 +513,7 @@ async def _apply(db: AsyncSession, row: Fertigation, payload: FertigationIn) -> 
         # Costed after the lines are attached, because whether this is an acid
         # tank — and so which rate its set count derives from — depends on what
         # is in it.
-        sets = calc.effective_sets(tank, stock_l, acid_l)
+        sets = calc.effective_sets(tank, solution_l, acid_l)
         tank.sets = sets
         for line in tank.lines:
             line.cost = calc.line_cost(line.quantity, sets, line.unit_price)

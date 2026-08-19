@@ -771,23 +771,33 @@ class Fertigation(Base):
     phase: Mapped[str | None] = mapped_column(String(60))
 
     type_of_application: Mapped[str | None] = mapped_column(String(60))
-    # Irrigation water delivered, in cubic metres — the number every other
-    # figure on the sheet is derived from.
-    volume_m3: Mapped[float | None] = mapped_column(Float)
+
+    # ── The one number keyed in, and everything derived from it ──────────
+    # Litres of solution made up — what the report calls sets. "1 set = 1,000
+    # litres; 6 sets = 6,000 litres." This is the input; the water is not.
+    solution_l: Mapped[float | None] = mapped_column(Float)
     area_ha: Mapped[float | None] = mapped_column(Float)
 
-    # The rate the farm plans to. The report works forwards from it:
-    #   m³ used = target m³/ha × greenhouse area
-    # so the water can be planned from the blocks rather than only recorded
-    # after the fact. Null means the volume was measured, not planned.
+    # Derived and stored so a signed sheet keeps its figures if a block is
+    # re-measured later. water = litres ÷ pump rate; the rest follows.
+    #   L/ha    = litres ÷ area
+    #   m³/ha   = (L/ha) ÷ pump rate
+    #   m³ used = m³/ha × area
+    volume_m3: Mapped[float | None] = mapped_column(Float)
+    l_per_ha: Mapped[float | None] = mapped_column(Float)
+    # The figure the report illustrates as 33.33. An outcome, never a target.
     target_m3_per_ha: Mapped[float | None] = mapped_column(Float)
     # Vermicompost rate varies with the weather, per the source report, so the
     # conditions are part of the record rather than a note.
     weather: Mapped[str | None] = mapped_column(String(80))
 
-    # Litres of stock solution injected per m³ of irrigation water. Held on the
-    # record rather than read from config at display time, so a rate change
-    # next season does not rewrite what this sheet said.
+    # The sarai valve rates: litres of solution and of acid injected per m³ of
+    # irrigation water. "Machine Pump Rate = 6 litres/m³ (this is fixed)" —
+    # fixed, but held on the record rather than read from config at display
+    # time, so a change next season cannot rewrite what this sheet said.
+    #
+    # The pump rate is also the conversion between the two units on the sheet:
+    # water m³ = litres ÷ this. It is not 1,000.
     fertiliser_rate_l_m3: Mapped[float] = mapped_column(Float, default=6.0)
     acid_rate_l_m3: Mapped[float] = mapped_column(Float, default=2.0)
 

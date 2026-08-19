@@ -26,7 +26,12 @@ from .routers import (
     scouting,
     spray,
 )
-from .seed import seed_fertilisers, seed_if_empty, seed_reference_agents
+from .seed import (
+    backfill_fertigation_litres,
+    seed_fertilisers,
+    seed_if_empty,
+    seed_reference_agents,
+)
 
 settings = get_settings()
 
@@ -88,6 +93,19 @@ async def lifespan(_: FastAPI):
                 "Reference register: added %d pest/disease row(s) and %d alias(es).",
                 agents,
                 aliases,
+            )
+
+        # Sheets raised before the fertigation units were corrected carry a
+        # water figure and no litres. Re-expressed so they read the same as
+        # they always did — see backfill_fertigation_litres for why this
+        # changes nothing on any sheet.
+        moved = await backfill_fertigation_litres(db)
+        if moved:
+            logging.getLogger("uvicorn.error").warning(
+                "Re-expressed %d fertigation sheet(s) in litres of solution. "
+                "Their figures are unchanged, but any raised while the "
+                "arithmetic was wrong are worth checking by hand.",
+                moved,
             )
 
     if settings.seed_on_startup:

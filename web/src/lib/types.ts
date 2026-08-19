@@ -681,6 +681,8 @@ export interface FertigationBlock {
   volume_m3: number | null;
   position: number;
   m3_per_ha?: number | null;
+  /** "m³ used = 33.33 × (Greenhouse Area in ha)" — this block's share. */
+  derived_m3?: number | null;
 }
 
 export interface Fertigation {
@@ -696,9 +698,15 @@ export interface Fertigation {
   blocks: FertigationBlock[];
   blocks_label: string | null;
   type_of_application: string | null;
-  volume_m3: number | null;
+  /** Litres of solution made up — the report's sets. The one keyed figure. */
+  solution_l: number | null;
   area_ha: number | null;
+  /** litres ÷ area. */
+  l_per_ha: number | null;
+  /** (L/ha) ÷ pump rate — the figure the report illustrates as 33.33. */
   target_m3_per_ha: number | null;
+  /** m³/ha × area — the water the pump rate implies. Derived, never keyed. */
+  volume_m3: number | null;
   weather: string | null;
   fertiliser_rate_l_m3: number;
   acid_rate_l_m3: number;
@@ -734,7 +742,8 @@ export interface FertigationBody {
   phase?: string | null;
   blocks: { greenhouse_id: number; area_ha?: number | null; volume_m3?: number | null }[];
   type_of_application?: string | null;
-  volume_m3?: number | null;
+  /** Litres of solution made up — the only volume the operator keys in. */
+  solution_l?: number | null;
   area_ha?: number | null;
   weather?: string | null;
   fertiliser_rate_l_m3: number;

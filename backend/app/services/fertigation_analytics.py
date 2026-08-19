@@ -41,9 +41,10 @@ async def _sheets(
 
 
 def _sheet_cost(sheet: Fertigation) -> float:
-    stock_l = calc.stock_required_l(sheet.volume_m3, sheet.fertiliser_rate_l_m3)
-    acid_l = calc.stock_required_l(sheet.volume_m3, sheet.acid_rate_l_m3)
-    return calc.total_cost(sheet.tanks, stock_l, acid_l)
+    solution_l = float(sheet.solution_l or 0)
+    pump = sheet.fertiliser_rate_l_m3 or calc.PUMP_RATE_L_PER_M3
+    acid_l = calc.acid_required_l(solution_l, pump, sheet.acid_rate_l_m3)
+    return calc.total_cost(sheet.tanks, solution_l, acid_l)
 
 
 def _sheet_area(sheet: Fertigation) -> float:
@@ -150,10 +151,11 @@ async def usage(
 
     agg: dict[str, dict] = {}
     for sheet in sheets:
-        stock_l = calc.stock_required_l(sheet.volume_m3, sheet.fertiliser_rate_l_m3)
-        acid_l = calc.stock_required_l(sheet.volume_m3, sheet.acid_rate_l_m3)
+        solution_l = float(sheet.solution_l or 0)
+        pump = sheet.fertiliser_rate_l_m3 or calc.PUMP_RATE_L_PER_M3
+        acid_l = calc.acid_required_l(solution_l, pump, sheet.acid_rate_l_m3)
         for tank in sheet.tanks:
-            sets = calc.effective_sets(tank, stock_l, acid_l)
+            sets = calc.effective_sets(tank, solution_l, acid_l)
             for line in tank.lines:
                 row = agg.setdefault(
                     line.fertiliser_code,
@@ -208,7 +210,11 @@ async def water(
     computed: list[tuple[Fertigation, float, float | None]] = []
     for sheet in sheets:
         area = _sheet_area(sheet)
-        per_ha = calc.m3_per_ha(sheet.volume_m3, area or None)
+        per_ha = calc.m3_per_ha(
+            sheet.solution_l,
+            area or None,
+            sheet.fertiliser_rate_l_m3 or calc.PUMP_RATE_L_PER_M3,
+        )
         computed.append((sheet, area, per_ha))
         if per_ha is not None:
             rates[sheet.phase or ""].append(per_ha)

@@ -1260,6 +1260,9 @@ class FertigationBlockOut(BaseModel):
     volume_m3: float | None
     position: int
     m3_per_ha: float | None = None
+    # "m³ used = 33.33 × (Greenhouse Area in ha)" — this block's own share of
+    # the water, from the rate the day worked out to.
+    derived_m3: float | None = None
 
 
 class FertigationIn(BaseModel):
@@ -1274,7 +1277,9 @@ class FertigationIn(BaseModel):
     # The greenhouses fed. Area is summed over these — BR-001.
     blocks: list[FertigationBlockIn] = []
     type_of_application: str | None = Field(default=None, max_length=60)
-    volume_m3: float | None = None
+    # The litres of solution made up — the report's sets. The only volume the
+    # operator keys in; the water is derived from it by the pump rate.
+    solution_l: float | None = None
     area_ha: float | None = None
     weather: str | None = Field(default=None, max_length=80)
     fertiliser_rate_l_m3: float = 6.0
@@ -1303,9 +1308,15 @@ class FertigationOut(BaseModel):
     # A one-line summary of the blocks, for lists and headings.
     blocks_label: str | None = None
     type_of_application: str | None = None
-    volume_m3: float | None = None
+    # What was keyed in.
+    solution_l: float | None = None
     area_ha: float | None = None
+    # …and the report's chain, derived from it.
+    l_per_ha: float | None = None
+    # The figure the report illustrates as 33.33 m³/ha.
     target_m3_per_ha: float | None = None
+    # m³/ha × area — the water the pump rate implies.
+    volume_m3: float | None = None
     weather: str | None = None
     fertiliser_rate_l_m3: float
     acid_rate_l_m3: float
@@ -1322,9 +1333,10 @@ class FertigationOut(BaseModel):
 
     # ── Derived, so every screen shows the same arithmetic ──
     total_cost: float = 0.0
-    # Stock solution the injection rate calls for, in litres, and the sets that
-    # implies at the tank volume in use.
+    # The litres keyed in, echoed here under the name the older screens used.
+    # Same number as `solution_l`; kept so nothing that reads it has to change.
     stock_required_l: float = 0.0
+    # Acid the sarai valve draws for that water: acid rate × water m³.
     acid_required_l: float = 0.0
     m3_per_ha: float | None = None
     # What the recorded sources add up to, and a note when that disagrees with

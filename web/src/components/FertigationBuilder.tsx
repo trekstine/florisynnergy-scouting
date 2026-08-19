@@ -30,21 +30,6 @@ const ACTIVITIES: { id: FertActivity; label: string }[] = [
 const SOURCES = ["Borehole", "River", "Reservoir", "Mix"];
 const APPLICATION_TYPES = ["Drip", "Drench", "Overhead", "Flush"];
 
-/**
- * Litres in, cubic metres on the record.
- *
- * Rounded to two decimals of a cubic metre — ten litres — because a float
- * division leaves 835000/1000 as 834.9999999999999 often enough to show up in
- * a total and look like a fault.
- */
-function lToM3(litres: number): number {
-  return Math.round((litres / 1000) * 100) / 100;
-}
-
-function m3ToL(m3: number): number {
-  return Math.round(m3 * 1000);
-}
-
 function defaultTanks(): FertigationTank[] {
   return [
     { code: "A", volume_l: 1000, sets_mode: "auto", sets: 1, note: null, lines: [] },
@@ -91,12 +76,10 @@ export function FertigationBuilder({
   const [blockVolumes, setBlockVolumes] = useState<Record<number, string>>({});
   const [perBlock, setPerBlock] = useState(false);
   const [applicationType, setApplicationType] = useState(APPLICATION_TYPES[0]!);
-  // Held in litres, because that is what the meter reads and what the
-  // operator writes down. The record keeps cubic metres: every rate on the
-  // sheet is defined per m³ — 6 L/m³ injection, 33.33 m³/ha — and every sheet
-  // already signed holds m³, so reinterpreting the stored figure as litres
-  // would multiply the farm's history by a thousand.
-  const [volumeL, setVolumeL] = useState("");
+  // Litres of solution made up — the report's sets, and the only volume
+  // anybody keys in. The water is derived from it by the pump rate, not by a
+  // unit conversion: 6 L/m³ means 6,000 L rides on 1,000 m³ of water.
+  const [solutionL, setSolutionL] = useState("");
   const [area, setArea] = useState("");
   const [weather, setWeather] = useState("");
   const [fertRate, setFertRate] = useState("6");
@@ -129,7 +112,7 @@ export function FertigationBuilder({
       setBlockVolumes(vols);
       setPerBlock(Object.keys(vols).length > 0);
       setApplicationType(editing.type_of_application ?? APPLICATION_TYPES[0]!);
-      setVolumeL(editing.volume_m3 != null ? String(m3ToL(editing.volume_m3)) : "");
+      setSolutionL(editing.solution_l != null ? String(editing.solution_l) : "");
       setArea(editing.area_ha != null ? String(editing.area_ha) : "");
       setWeather(editing.weather ?? "");
       setFertRate(String(editing.fertiliser_rate_l_m3));
@@ -147,7 +130,7 @@ export function FertigationBuilder({
       setBlockVolumes({});
       setPerBlock(false);
       setApplicationType(APPLICATION_TYPES[0]!);
-      setVolumeL("");
+      setSolutionL("");
       setArea("");
       setWeather("");
       setFertRate("6");
@@ -181,23 +164,35 @@ export function FertigationBuilder({
     [allHouses, blockIds],
   );
 
-  // One conversion point, so nothing downstream has to remember which unit it
-  // is holding.
-  const volumeNum = lToM3(Number(volumeL) || 0);
+  const solutionNum = Number(solutionL) || 0;
   const areaNum = Number(area) || selectedArea || 0;
   const fertRateNum = Number(fertRate) || 0;
   const acidRateNum = Number(acidRate) || 0;
 
-  /** Mirrors the server exactly, so the running totals cannot mislead. */
+  /**
+   * The report's chain, mirrored exactly so the running totals cannot mislead.
+   *
+   *   sets    = litres ÷ tank volume
+   *   L/ha    = litres ÷ area
+   *   m³/ha   = (L/ha) ÷ pump rate
+   *   water   = m³/ha × area
+   *   acid L  = acid rate × water
+   */
   const d = useMemo(() => {
-    const stock = Math.round(volumeNum * fertRateNum * 100) / 100;
-    const acid = Math.round(volumeNum * acidRateNum * 100) / 100;
+    const litres = solutionNum;
+    const water = fertRateNum > 0 ? Math.round((litres / fertRateNum) * 100) / 100 : 0;
+    const acid = Math.round(water * acidRateNum * 100) / 100;
+    const perHaL = areaNum > 0 ? Math.round((litres / areaNum) * 100) / 100 : null;
+    const perHa =
+      perHaL != null && fertRateNum > 0
+        ? Math.round((perHaL / fertRateNum) * 100) / 100
+        : null;
 
-    // Which rate a tank is dosed at follows what is in it, not its letter.
+    // Which rate a tank is made up at follows what is in it, not its letter.
     const isAcid = (t: FertigationTank) => t.lines.some((l) => l.is_acid);
     const implied = (t: FertigationTank) =>
       t.volume_l > 0
-        ? Math.round(((isAcid(t) ? acid : stock) / t.volume_l) * 1000) / 1000
+        ? Math.round(((isAcid(t) ? acid : litres) / t.volume_l) * 1000) / 1000
         : 0;
     const sets = (t: FertigationTank) => {
       if (t.sets_mode === "manual") return Math.max(t.sets, 0);
@@ -214,20 +209,22 @@ export function FertigationBuilder({
       Math.round(sources.reduce((s, x) => s + (x.volume_m3 ?? 0), 0) * 100) / 100;
 
     return {
-      stock,
+      litres,
+      water,
       acid,
+      perHaL,
+      perHa,
       isAcid,
       implied,
       sets,
       cost: Math.round(cost * 100) / 100,
-      perHa: areaNum ? Math.round((volumeNum / areaNum) * 100) / 100 : null,
       srcTotal,
       srcGap:
-        volumeNum > 0 && srcTotal > 0 && Math.abs(srcTotal - volumeNum) >= 0.5
-          ? Math.round((srcTotal - volumeNum) * 100) / 100
+        water > 0 && srcTotal > 0 && Math.abs(srcTotal - water) >= 0.5
+          ? Math.round((srcTotal - water) * 100) / 100
           : null,
     };
-  }, [volumeNum, areaNum, fertRateNum, acidRateNum, tanks, sources]);
+  }, [solutionNum, areaNum, fertRateNum, acidRateNum, tanks, sources]);
 
   const warnings = useMemo(() => {
     const out: string[] = [];
@@ -297,7 +294,7 @@ export function FertigationBuilder({
         volume_m3: perBlock && blockVolumes[id] ? Number(blockVolumes[id]) : null,
       })),
       type_of_application: applicationType,
-      volume_m3: volumeNum || null,
+      solution_l: solutionNum || null,
       area_ha: area ? Number(area) : null,
       weather: weather || null,
       fertiliser_rate_l_m3: fertRateNum,
@@ -353,11 +350,13 @@ export function FertigationBuilder({
 
         {/* Running totals, pinned. Every figure below feeds one of these, so
             there is never a reason to scroll back up to check one. */}
-        <div className="grid grid-cols-3 gap-px border-b border-line bg-line sm:grid-cols-5">
+        <div className="grid grid-cols-3 gap-px border-b border-line bg-line sm:grid-cols-6">
+          {/* The report's chain, left to right, in its own order. */}
+          <Stat label="Solution" value={d.litres ? `${d.litres.toLocaleString()} L` : "—"} />
           <Stat label="Area" value={areaNum ? `${areaNum} ha` : "—"} />
-          <Stat label="Water" value={volumeNum ? `${volumeNum} m³` : "—"} />
+          <Stat label="L/ha" value={d.perHaL != null ? String(d.perHaL) : "—"} />
           <Stat label="m³/ha" value={d.perHa != null ? String(d.perHa) : "—"} />
-          <Stat label="Stock" value={d.stock ? `${d.stock} L` : "—"} />
+          <Stat label="Water" value={d.water ? `${d.water.toLocaleString()} m³` : "—"} />
           <Stat label="Cost" value={d.cost ? money(d.cost) : "—"} strong />
         </div>
 
@@ -473,68 +472,63 @@ export function FertigationBuilder({
           {/* ── 2. Water — needs the area from step 1 ── */}
           <Step n={2} title="Water">
             <div className="grid gap-3 sm:grid-cols-4">
-              <Field label="Water applied (litres)">
+              <Field label="Solution made up (litres)">
                 <TextInput
                   type="number"
                   min={0}
                   step="1"
-                  value={volumeL}
-                  onChange={(e) => setVolumeL(e.target.value)}
-                  placeholder="835000"
+                  value={solutionL}
+                  onChange={(e) => setSolutionL(e.target.value)}
+                  placeholder="6000"
                 />
               </Field>
-              <Field label="= m³">
-                <div className="flex h-[38px] items-center rounded-lg border border-line bg-surface px-3 text-sm font-semibold tabular-nums text-ink">
-                  {volumeNum > 0 ? (
-                    volumeNum.toLocaleString()
-                  ) : (
-                    <span className="text-xs font-normal text-ink-faint">—</span>
-                  )}
-                </div>
-              </Field>
-              {/* Read-only, and derived. It was an editable field beside the
-                  volume, which let a sheet state a rate its own figures did
-                  not support — the same fault the set count had. The water is
-                  measured; the rate is what that comes to. */}
-              <Field label="m³/ha (from the water)">
-                <div className="flex h-[38px] items-center rounded-lg border border-line bg-surface px-3 text-sm font-semibold tabular-nums text-ink">
-                  {d.perHa != null ? (
-                    d.perHa
-                  ) : (
-                    <span className="text-xs font-normal text-ink-faint">
-                      {areaNum > 0 ? "enter the water" : "select blocks first"}
-                    </span>
-                  )}
-                </div>
-              </Field>
-              <Field label="Area (ha)">
-                <TextInput
-                  type="number"
-                  min={0}
-                  step="0.001"
-                  value={area}
-                  onChange={(e) => setArea(e.target.value)}
-                  placeholder={selectedArea ? String(selectedArea) : "from blocks"}
+              {/* Everything from here is derived. The report's chain runs
+                  litres → L/ha → m³/ha → water, and a second editable copy of
+                  any of them is how a sheet ends up disagreeing with itself. */}
+              <Field label="Sets">
+                <Derived
+                  value={
+                    d.litres > 0
+                      ? `${Math.round((d.litres / 1000) * 100) / 100}`
+                      : null
+                  }
+                  hint="litres ÷ 1,000"
                 />
               </Field>
-              <Field label="Type">
-                <Select
-                  value={applicationType}
-                  onChange={(e) => setApplicationType(e.target.value)}
-                >
-                  {APPLICATION_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </Select>
+              <Field label="L / ha">
+                <Derived
+                  value={d.perHaL != null ? d.perHaL.toLocaleString() : null}
+                  hint={areaNum > 0 ? "litres ÷ area" : "select blocks first"}
+                />
+              </Field>
+              <Field label="m³ / ha">
+                <Derived
+                  value={d.perHa != null ? String(d.perHa) : null}
+                  hint={`(L/ha) ÷ ${fertRateNum || 6}`}
+                />
+              </Field>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Water (m³)">
+                <Derived
+                  value={d.water ? d.water.toLocaleString() : null}
+                  hint={`litres ÷ ${fertRateNum || 6} — the pump rate, not 1,000`}
+                />
+              </Field>
+              <Field label="Acid (L)">
+                <Derived
+                  value={d.acid ? d.acid.toLocaleString() : null}
+                  hint={`${acidRateNum || 2} L/m³ × water`}
+                />
               </Field>
             </div>
 
             {d.perHa != null && (
               <Note tone="flat">
-                {Number(volumeL).toLocaleString()} L = {volumeNum.toLocaleString()} m³ ÷{" "}
-                {areaNum} ha = <strong>{d.perHa} m³/ha</strong>
+                {d.litres.toLocaleString()} L ÷ {areaNum} ha = {d.perHaL} L/ha ÷{" "}
+                {fertRateNum || 6} = <strong>{d.perHa} m³/ha</strong> ·{" "}
+                {d.water.toLocaleString()} m³ of water
               </Note>
             )}
 
@@ -1020,5 +1014,25 @@ function Note({
     >
       {children}
     </p>
+  );
+}
+
+/**
+ * A figure the sheet works out rather than one anybody types.
+ *
+ * Shown as a field so the chain reads in order, but plainly not editable, and
+ * carrying its own working. The report's arithmetic is short and somebody
+ * checking a sheet should be able to follow it without leaving the form.
+ */
+function Derived({ value, hint }: { value: string | null; hint?: string }) {
+  return (
+    <div>
+      <div className="flex h-[38px] items-center rounded-lg border border-line bg-surface px-3 text-sm font-semibold tabular-nums text-ink">
+        {value ?? <span className="text-xs font-normal text-ink-faint">—</span>}
+      </div>
+      {hint && (
+        <p className="mt-0.5 text-[10px] leading-tight text-ink-faint">{hint}</p>
+      )}
+    </div>
   );
 }

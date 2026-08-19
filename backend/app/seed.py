@@ -19,6 +19,7 @@ from .models import (
     Disease,
     Employee,
     Farm,
+    Fertigation,
     Fertiliser,
     Greenhouse,
     IntegrationAlias,
@@ -30,6 +31,7 @@ from .models import (
 )
 from .seed_greenhouses import GREENHOUSE_BOUNDARIES
 from .security import hash_secret
+from .services import fertigation as fert_calc
 from .services.recommendations import evaluate_entry, evaluate_outcome
 from .services.spray import compose_spray
 
@@ -745,3 +747,49 @@ async def seed_if_empty(db: AsyncSession) -> bool:
 
     await db.commit()
     return True
+
+
+async def backfill_fertigation_litres(db: AsyncSession) -> int:
+    """Give sheets raised before the units were corrected their litres.
+
+    Returns the number of rows filled.
+
+    The old model asked for irrigation water and derived the solution from it
+    by multiplying by the pump rate. The new one asks for the solution and
+    derives the water by dividing. So for any existing sheet:
+
+        solution_l = old volume_m3 × pump rate
+
+    reproduces *exactly* what that sheet already displayed — the same set
+    counts, the same issue weights, the same cost, and the same water, since
+    ``solution_l ÷ pump = volume_m3`` returns the figure it started with. It is
+    a re-parameterisation, not a restatement: nothing on any sheet changes.
+
+    What it cannot do is tell you whether the number originally keyed in meant
+    what the operator intended. It preserves what the portal showed; sheets
+    raised while the arithmetic was wrong are still worth checking by hand, and
+    the deploy log says how many there were.
+
+    Runs once — only where the litres are missing and a volume exists.
+    """
+    rows = (
+        await db.execute(
+            select(Fertigation).where(
+                Fertigation.solution_l.is_(None),
+                Fertigation.volume_m3.isnot(None),
+            )
+        )
+    ).scalars().all()
+
+    filled = 0
+    for row in rows:
+        pump = row.fertiliser_rate_l_m3 or fert_calc.PUMP_RATE_L_PER_M3
+        row.solution_l = round(float(row.volume_m3) * pump, 2)
+        row.l_per_ha = fert_calc.l_per_ha(row.solution_l, row.area_ha)
+        row.target_m3_per_ha = fert_calc.m3_per_ha(row.solution_l, row.area_ha, pump)
+        row.volume_m3 = fert_calc.water_m3(row.solution_l, pump)
+        filled += 1
+
+    if filled:
+        await db.commit()
+    return filled

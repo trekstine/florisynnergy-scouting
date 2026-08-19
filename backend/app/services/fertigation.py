@@ -1,44 +1,53 @@
-"""The arithmetic on a fertigation sheet.
+"""The arithmetic on a fertigation sheet, exactly as the Fertigation Report gives it.
 
-All of it derives from one measured number — the cubic metres of water that
-went on, taken from the phase meter readings before and after — through rates
-the farm sets. Kept in one place so the builder, the list, the document and any
-later report cannot drift apart on what a figure means.
+Nothing here is derived from anywhere else. The report's own chain, in its own
+order, is the whole of it:
 
-What the Fertigation Report actually fixes, and what it merely illustrates,
-matters here and is easy to get backwards:
+    1 set = 1,000 litres
+    6 sets = 6,000 litres
+    Total Roses Area (GH1–GH10) ≈ 30 hectares
+    Per hectare = 6,000 litres / 30 ha = 200 litres/ha
+    Machine Pump Rate = 6 litres/m³   (fixed)
+    Hence: m³ per ha = 200 / 6 ≈ 33.33 m³/ha
+    m³ used = 33.33 × (Greenhouse Area in ha)
 
-**Fixed by the regime**
+Read that carefully, because it is easy to get backwards and I did:
 
-    Sarai valves inject 6 L of fertiliser stock and 2 L of acid per m³ of water.
-    A set is one make-up of a tank: Tanks A and B hold 1,000 L, Tank C 500 L.
-    Each tank's recipe is written per its own volume — 132 kg CaNO₃ per 1,000 L
-    of Tank A, 24 kg H₂SO₄ per 500 L of Tank C.
+**The litres are the input.** The operator keys in the litres of solution made
+up — the sets. 6,000 L is six sets. The irrigation water is *derived* from it,
+by dividing by the pump rate. Water is an output, not something anyone types.
 
-**Worked examples, not constants**
+**The pump rate converts litres to cubic metres.** 6 L/m³ means six litres of
+solution go out with every cubic metre of water, so ``water m³ = litres ÷ 6``.
+It is emphatically not 1,000 — dividing litres by 1,000 is a volume conversion
+and has no place in this chain. That mistake put the water out by a factor of
+167.
 
-    The report walks through one day: 6 sets = 6,000 L of stock, over roughly
-    30 ha, giving 200 L/ha, which at 6 L/m³ is about 33.33 m³/ha. Every figure
-    in that sentence is an illustration. The report says so plainly a page
-    later — "there is no predefined number of sets (this is the volume used,
-    can be 5 or 6)" — and the areas differ between the two source documents
-    anyway. So 33.33 is never a target and never a default; it is simply what
-    that day's water came to per hectare, and it changes every time.
+So:
 
-The direction of the calculation is therefore:
+    litres keyed in
+      ├─ sets      = litres ÷ tank volume        (1,000 L for A and B, 500 for C)
+      ├─ L/ha      = litres ÷ area fed
+      ├─ m³/ha     = (L/ha) ÷ pump rate
+      ├─ water m³  = m³/ha × area fed
+      ├─ per block = m³/ha × that block's area   ("m³ used = 33.33 × area")
+      └─ acid L    = acid rate × water m³        (2 L/m³ at the sarai valve)
 
-    water m³ (metered)  →  stock L = m³ × 6  →  sets = stock L ÷ tank volume
-                        →  issue per fertiliser = recipe × sets
-                        →  m³/ha = water ÷ area fed
+The 6,000 L, the 30 ha and the 33.33 m³/ha in the report are one day's worked
+example, not constants. The report says so itself: *there is no predefined
+number of sets (this is the volume used, can be 5 or 6)*. The pump rate and the
+acid rate are the fixed parts.
 
-Rates and tank volumes are configurable and stored on each record, because the
-supplied documents already disagree with each other — 132 kg of CaNO₃ in the
-report against 145 kg in the printed regime. A sheet has to keep saying what it
-said when it was signed.
+Rates and tank volumes are stored on each record even though they are fixed
+today, because a signed sheet has to keep saying what it said.
 """
 from __future__ import annotations
 
 from typing import Iterable, Protocol
+
+# The report's fixed figures, used as defaults only.
+PUMP_RATE_L_PER_M3 = 6.0
+ACID_RATE_L_PER_M3 = 2.0
 
 
 class _Line(Protocol):
@@ -55,70 +64,140 @@ class _Tank(Protocol):
     lines: list
 
 
-def stock_required_l(volume_m3: float | None, rate_l_m3: float) -> float:
-    """Litres of stock solution the injection rate calls for."""
-    if not volume_m3 or rate_l_m3 <= 0:
-        return 0.0
-    return round(volume_m3 * rate_l_m3, 2)
+# ── the chain, in the report's order ─────────────────────────────────────────
+def sets_for(solution_l: float | None, tank_volume_l: float) -> float:
+    """How many tank-fulls the litres make up.
 
+    "1 set = 1,000 litres" — so six thousand litres is six sets of a 1,000 L
+    tank, and four of a 500 L one.
 
-def sets_for(stock_l: float, tank_volume_l: float) -> float:
-    """How many tank-fulls that is.
-
-    Returned as a decimal rather than rounded up: the operator confirms the
-    approved set count, and quietly rounding 5.2 to 6 would overstate the
-    material issued by most of a tank.
+    Decimal rather than rounded up: the report is explicit that the count is
+    "the volume used, can be 5 or 6", so 5.2 is a real answer and rounding it
+    to 6 would overstate what leaves the store by most of a tank.
     """
-    if tank_volume_l <= 0:
+    if not solution_l or tank_volume_l <= 0:
         return 0.0
-    return round(stock_l / tank_volume_l, 3)
+    return round(solution_l / tank_volume_l, 3)
 
 
+def l_per_ha(solution_l: float | None, area_ha: float | None) -> float | None:
+    """"Per hectare = 6,000 litres / 30 ha = 200 litres/ha"."""
+    if not solution_l or not area_ha or area_ha <= 0:
+        return None
+    return round(solution_l / area_ha, 2)
+
+
+def m3_per_ha(
+    solution_l: float | None,
+    area_ha: float | None,
+    pump_rate_l_m3: float = PUMP_RATE_L_PER_M3,
+) -> float | None:
+    """"m³ per ha = 200 / 6 ≈ 33.33 m³/ha".
+
+    The litres per hectare divided by the pump rate. This is the figure the
+    report illustrates as 33.33 — an outcome of that day's volume and area, not
+    a target and not a default.
+    """
+    per_ha = l_per_ha(solution_l, area_ha)
+    if per_ha is None or pump_rate_l_m3 <= 0:
+        return None
+    return round(per_ha / pump_rate_l_m3, 2)
+
+
+def water_m3(
+    solution_l: float | None,
+    pump_rate_l_m3: float = PUMP_RATE_L_PER_M3,
+) -> float | None:
+    """The irrigation water the pump rate implies.
+
+    Equivalent to ``m³/ha × area``, and stated separately because it is the
+    figure the meters are read against. Six litres of solution per cubic metre
+    of water means a thousand cubic metres carried the six thousand litres.
+    """
+    if not solution_l or pump_rate_l_m3 <= 0:
+        return None
+    return round(solution_l / pump_rate_l_m3, 2)
+
+
+def block_m3(m3_per_hectare: float | None, block_area_ha: float | None) -> float | None:
+    """"To calculate the cubic meters used for a specific greenhouse:
+    m³ used = 33.33 × (Greenhouse Area in ha)"."""
+    if m3_per_hectare is None or not block_area_ha or block_area_ha <= 0:
+        return None
+    return round(m3_per_hectare * block_area_ha, 2)
+
+
+def acid_required_l(
+    solution_l: float | None,
+    pump_rate_l_m3: float = PUMP_RATE_L_PER_M3,
+    acid_rate_l_m3: float = ACID_RATE_L_PER_M3,
+) -> float:
+    """"Sarai valves take in 6 litres/m³ of fertilizer and 2 litres/m³ of acid."
+
+    Acid is dosed against the *water*, like the fertiliser is — so it follows
+    the water the fertiliser litres imply.
+    """
+    water = water_m3(solution_l, pump_rate_l_m3)
+    if water is None or acid_rate_l_m3 <= 0:
+        return 0.0
+    return round(water * acid_rate_l_m3, 2)
+
+
+# ── tanks ────────────────────────────────────────────────────────────────────
 def is_acid_tank(tank: _Tank) -> bool:
-    """Is this tank dosed at the acid rate?
+    """Is this tank made up at the acid rate?
 
-    Decided by what is in it, not by what it is called. The supplied sheet
-    happens to put acids in "Tank C", but a farm with two acid tanks, or one
-    that letters them differently, must still get the right rate.
+    Decided by what is in it, not by what it is called. The report puts acids
+    in "Tank C", but a farm with two acid tanks, or one that letters them
+    differently, must still get the right figure.
     """
     return any(getattr(line, "is_acid", False) for line in tank.lines)
 
 
-def implied_sets(tank: _Tank, stock_l: float, acid_l: float) -> float:
-    """The set count the water volume calls for, at this tank's own volume."""
-    return sets_for(acid_l if is_acid_tank(tank) else stock_l, tank.volume_l)
+def implied_sets(tank: _Tank, solution_l: float, acid_l: float) -> float:
+    """Tank-fulls this tank makes up, at its own volume.
+
+    A and B are made up in 1,000 L and C in 500 L, and each tank's recipe is
+    written per its own volume — so a day of 6,000 L of fertiliser solution and
+    2,000 L of acid is six make-ups of A and B and four of C.
+    """
+    return sets_for(acid_l if is_acid_tank(tank) else solution_l, tank.volume_l)
 
 
-def effective_sets(tank: _Tank, stock_l: float, acid_l: float) -> float:
-    """The set count actually in force — the one costing must use.
+def effective_sets(tank: _Tank, solution_l: float, acid_l: float) -> float:
+    """The count actually in force — the one costing must use.
 
     Two numbers that should agree is how a sheet ends up lying: the operator
-    types 1, the water volume implies 5, and the cost silently follows the
-    typed figure. So the derived value governs unless somebody has explicitly
-    said otherwise, and the sheet shows both when they differ.
+    types 1, the litres imply 6, and the cost silently follows the typed
+    figure. The derived value governs unless somebody has explicitly overridden
+    it, and the sheet shows both when they differ.
     """
     if getattr(tank, "sets_mode", "auto") == "manual":
         return max(float(tank.sets or 0), 0.0)
-    derived = implied_sets(tank, stock_l, acid_l)
-    # Nothing to derive from yet — fall back to whatever is on the record so a
+    derived = implied_sets(tank, solution_l, acid_l)
+    # Nothing to derive from yet — fall back to what is on the record so a
     # part-filled draft still costs something sensible.
     return derived if derived > 0 else max(float(tank.sets or 0), 0.0)
 
 
 def line_cost(quantity: float, sets: float, unit_price: float | None) -> float | None:
-    """What one fertiliser costs across every set made up.
+    """What one fertiliser costs across every tank-full made up.
 
-    The recipe is written per tank, so a sheet for five sets uses five times
-    the quantity on the line — costing the line as written would understate
-    the issue by a factor of the set count.
+    "Defined Rate per Set (1,000 litres) for CANO₃ = 132 kg. For 6 sets:
+    132 × 6 = 792 kg." Costing the line as written would understate the issue
+    by a factor of the set count.
     """
     if unit_price is None:
         return None
     return round(quantity * max(sets, 0) * unit_price, 2)
 
 
+def line_issue(quantity: float, sets: float) -> float:
+    """The weight or volume the store actually issues — recipe × tank-fulls."""
+    return round(quantity * max(sets, 0), 3)
+
+
 def tank_cost(tank: _Tank, sets: float | None = None) -> float:
-    """What this tank costs across the sets actually being made up."""
     n = tank.sets if sets is None else sets
     total = 0.0
     for line in tank.lines:
@@ -128,71 +207,24 @@ def tank_cost(tank: _Tank, sets: float | None = None) -> float:
     return round(total, 2)
 
 
-def total_cost(tanks: Iterable[_Tank], stock_l: float = 0.0, acid_l: float = 0.0) -> float:
+def total_cost(
+    tanks: Iterable[_Tank], solution_l: float = 0.0, acid_l: float = 0.0
+) -> float:
     return round(
-        sum(tank_cost(t, effective_sets(t, stock_l, acid_l)) for t in tanks), 2
+        sum(tank_cost(t, effective_sets(t, solution_l, acid_l)) for t in tanks), 2
     )
 
 
-def sources_total_m3(sources: Iterable) -> float:
-    """Water accounted for by the recorded sources."""
-    return round(sum(float(getattr(s, "volume_m3", 0) or 0) for s in sources), 2)
-
-
-def source_mismatch(volume_m3: float | None, sources: Iterable) -> str | None:
-    """Does the source breakdown add up to the water that went on?
-
-    Not an error — a farm may record only the borehole and leave the rest — but
-    a silent difference between the water applied and the sources it was drawn
-    from is exactly the sort of thing nobody notices until an audit. The report
-    asks for river, borehole and reservoir-to-field to be recorded each day, so
-    the two ought to agree.
-    """
-    listed = list(sources)
-    if not volume_m3 or not listed:
-        return None
-    total = sources_total_m3(listed)
-    if total <= 0:
-        return None
-    diff = round(total - volume_m3, 2)
-    if abs(diff) < 0.5:  # rounding on a meter, not a discrepancy
-        return None
-    return (
-        f"Water sources total {total} m³ against {volume_m3} m³ applied "
-        f"({'+' if diff > 0 else ''}{diff} m³)."
-    )
-
-
+# ── the blocks fed ───────────────────────────────────────────────────────────
 def selected_area_ha(blocks: Iterable) -> float:
-    """BR-001 — the area a fertigation actually covered.
+    """The area a fertigation covered — the sum over the blocks fed.
 
-    The sum over the blocks selected, not a single block's hectares. A phase
-    fed as one event covers every greenhouse on it, and dividing the water by
-    one block's area would overstate m³/ha several times over.
+    Not one block's hectares. A phase fed as one event covers every greenhouse
+    on it, and dividing by a single block's area would overstate L/ha and
+    m³/ha several times over.
     """
     total = sum(float(getattr(b, "area_ha", 0) or 0) for b in blocks)
     return round(total, 4)
-
-
-def applied_rate_m3_per_ha(volume_m3: float | None, area_ha: float | None) -> float | None:
-    """The rate the water actually came to, over the area it covered.
-
-    This is the figure the report illustrates as "≈ 33.33 m³/ha". It is an
-    outcome, not a target: the farm meters the water that went on and this is
-    what it works out to per hectare, so it differs from day to day and from
-    phase to phase. Nothing should default to it or measure against it.
-
-    It replaces a typed field. Two editable numbers describing one fact is how
-    a sheet ends up disagreeing with itself — the same fault the set count had,
-    where a typed 1 sat beside a derived 6 and the costing followed the wrong
-    one.
-
-    Derived at write time and stored on the record, so a signed sheet keeps
-    saying what it said even if a block is later re-measured.
-    """
-    if not volume_m3 or not area_ha or area_ha <= 0:
-        return None
-    return round(volume_m3 / area_ha, 2)
 
 
 def blocks_total_m3(blocks: Iterable) -> float:
@@ -200,54 +232,57 @@ def blocks_total_m3(blocks: Iterable) -> float:
     return round(sum(float(getattr(b, "volume_m3", 0) or 0) for b in blocks), 2)
 
 
-def block_mismatch(volume_m3: float | None, blocks: Iterable) -> str | None:
-    """Do the per-block figures add up to the water that went on?"""
+def block_mismatch(total_water_m3: float | None, blocks: Iterable) -> str | None:
+    """Do the per-block figures add up to the water the litres imply?"""
     listed = [b for b in blocks if getattr(b, "volume_m3", None)]
-    if not volume_m3 or not listed:
+    if not total_water_m3 or not listed:
         return None
     total = blocks_total_m3(listed)
-    diff = round(total - volume_m3, 2)
+    diff = round(total - total_water_m3, 2)
     if abs(diff) < 0.5:
         return None
     return (
-        f"Per-greenhouse volumes total {total} m³ against {volume_m3} m³ "
-        f"applied ({'+' if diff > 0 else ''}{diff} m³)."
+        f"Per-greenhouse volumes total {total} m³ against {total_water_m3} m³ "
+        f"implied by the litres made up ({'+' if diff > 0 else ''}{diff} m³)."
     )
 
 
-def block_m3_per_ha(block, fallback_total_m3: float | None, total_area: float) -> float | None:
-    """m³/ha for one block.
+# ── water sources ────────────────────────────────────────────────────────────
+def sources_total_m3(sources: Iterable) -> float:
+    return round(sum(float(getattr(s, "volume_m3", 0) or 0) for s in sources), 2)
 
-    Uses its own metered volume where there is one. Otherwise the phase total
-    is apportioned by area, which is the assumption the farm makes when it
-    quotes a single m³/ha for a whole phase.
+
+def source_mismatch(total_water_m3: float | None, sources: Iterable) -> str | None:
+    """Does the source breakdown add up to the water that went on?
+
+    Not an error — a farm may record only the borehole and leave the rest — but
+    the report asks for river, borehole and reservoir-to-field to be recorded
+    each day, so the two ought to agree, and a silent gap is exactly the sort
+    of thing nobody notices until an audit.
     """
-    area = float(getattr(block, "area_ha", 0) or 0)
-    if area <= 0:
+    listed = list(sources)
+    if not total_water_m3 or not listed:
         return None
-    own = getattr(block, "volume_m3", None)
-    if own:
-        return round(float(own) / area, 2)
-    if fallback_total_m3 and total_area > 0:
-        share = float(fallback_total_m3) * (area / total_area)
-        return round(share / area, 2)
-    return None
-
-
-def m3_per_ha(volume_m3: float | None, area_ha: float | None) -> float | None:
-    """The figure the farm actually compares between days."""
-    if not volume_m3 or not area_ha:
+    total = sources_total_m3(listed)
+    if total <= 0:
         return None
-    return round(volume_m3 / area_ha, 2)
+    diff = round(total - total_water_m3, 2)
+    if abs(diff) < 0.5:  # rounding on a meter, not a discrepancy
+        return None
+    return (
+        f"Water sources total {total} m³ against {total_water_m3} m³ implied "
+        f"by the litres made up ({'+' if diff > 0 else ''}{diff} m³)."
+    )
 
 
+# ── chemistry ────────────────────────────────────────────────────────────────
 def tank_warnings(tanks: Iterable[_Tank]) -> list[str]:
     """Chemistry the sheet should not get wrong.
 
     Calcium must not share a tank with sulphate or phosphate: calcium sulphate
     and calcium phosphate are barely soluble and will drop out as a sludge that
-    blocks the drippers. That separation is the reason stock tanks are split
-    A/B in the first place, so the software should say so rather than let
+    blocks the drippers. That separation is why the report splits Tank A from
+    Tank B in the first place, so the software should say so rather than let
     somebody discover it at the emitters.
     """
     warnings: list[str] = []

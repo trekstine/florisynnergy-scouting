@@ -86,10 +86,10 @@ export default function FertigationDocPage() {
           <Kv label="Phase" value={f.phase ?? "—"} />
           <Kv label="Type of application" value={f.type_of_application ?? "—"} />
           <Kv
-            label="Total water applied"
+            label="Solution made up"
             value={
-              f.volume_m3 != null
-                ? `${Math.round(f.volume_m3 * 1000).toLocaleString()} L (${f.volume_m3} m³)`
+              f.solution_l != null
+                ? `${f.solution_l.toLocaleString()} L · ${Math.round((f.solution_l / 1000) * 100) / 100} sets`
                 : "—"
             }
             strong
@@ -102,37 +102,43 @@ export default function FertigationDocPage() {
                 : "—"
             }
           />
+          <Kv label="L per ha" value={f.l_per_ha != null ? String(f.l_per_ha) : "—"} />
           <Kv label="m³ per ha" value={f.m3_per_ha != null ? String(f.m3_per_ha) : "—"} />
+          <Kv
+            label="Water applied"
+            value={f.volume_m3 != null ? `${f.volume_m3.toLocaleString()} m³` : "—"}
+            strong
+          />
           <Kv label="Applicator" value={f.applicator ?? "—"} />
-          {f.m3_per_ha != null && (
-            <Kv label="Rate applied" value={`${f.m3_per_ha} m³/ha`} />
-          )}
           {f.weather && <Kv label="Weather" value={f.weather} />}
         </div>
 
-        {/* What the injection rates call for — the sum the farm did by hand. */}
-        <Section title="Solution required">
+        {/* The report's chain, written out, so anybody checking the sheet can
+            follow the arithmetic without leaving the page. */}
+        <Section title="How the figures follow">
           <div className="grid grid-cols-2 gap-x-8 gap-y-2 sm:grid-cols-4">
+            <Kv label="Pump rate" value={`${f.fertiliser_rate_l_m3} L per m³`} />
+            <Kv label="Acid rate" value={`${f.acid_rate_l_m3} L per m³`} />
+            <Kv label="Acid required" value={`${f.acid_required_l} L`} strong />
             <Kv
-              label="Fertiliser injection"
-              value={`${f.fertiliser_rate_l_m3} L per m³`}
+              label="Sets"
+              value={
+                f.solution_l != null
+                  ? String(Math.round((f.solution_l / 1000) * 100) / 100)
+                  : "—"
+              }
+              strong
             />
-            <Kv label="Stock solution" value={`${f.stock_required_l} L`} strong />
-            <Kv label="Acid injection" value={`${f.acid_rate_l_m3} L per m³`} />
-            <Kv label="Acid solution" value={`${f.acid_required_l} L`} strong />
           </div>
-          {f.m3_per_ha != null && (
-            <p className="mt-2 text-[10px] text-ink-faint">
-              Rate applied: {Math.round((f.volume_m3 ?? 0) * 1000).toLocaleString()} L
-              = {f.volume_m3} m³ ÷ {f.area_ha} ha = {f.m3_per_ha} m³/ha.
-            </p>
-          )}
-          {f.volume_m3 != null && (
-            <p className="mt-2 text-[10px] text-ink-faint">
-              {f.volume_m3} m³ × {f.fertiliser_rate_l_m3} L/m³ ={" "}
-              {f.stock_required_l} L stock solution · {f.volume_m3} m³ ×{" "}
-              {f.acid_rate_l_m3} L/m³ = {f.acid_required_l} L acid. Each tank&apos;s
-              set count is that figure divided by the tank&apos;s own volume.
+          {f.solution_l != null && f.m3_per_ha != null && (
+            <p className="mt-2 text-[10px] leading-relaxed text-ink-faint">
+              {f.solution_l.toLocaleString()} L ÷ {f.area_ha} ha ={" "}
+              {f.l_per_ha} L/ha · {f.l_per_ha} ÷ {f.fertiliser_rate_l_m3} ={" "}
+              {f.m3_per_ha} m³/ha · {f.m3_per_ha} × {f.area_ha} ha ={" "}
+              {f.volume_m3?.toLocaleString()} m³ of water · acid{" "}
+              {f.acid_rate_l_m3} L/m³ × {f.volume_m3?.toLocaleString()} m³ ={" "}
+              {f.acid_required_l} L. Each tank&apos;s set count is its own share
+              divided by its own volume.
             </p>
           )}
         </Section>
@@ -159,7 +165,12 @@ export default function FertigationDocPage() {
                       {b.area_ha ?? "—"}
                     </td>
                     <td className="py-1.5 text-right tabular-nums">
-                      {b.volume_m3 ?? <span className="text-ink-faint">apportioned</span>}
+                      {/* "m³ used = 33.33 × (Greenhouse Area in ha)" — the
+                          report's own per-greenhouse figure. A metered volume
+                          wins where the farm recorded one. */}
+                      {b.volume_m3 ?? b.derived_m3 ?? (
+                        <span className="text-ink-faint">—</span>
+                      )}
                     </td>
                     <td className="py-1.5 text-right tabular-nums">
                       {b.m3_per_ha ?? "—"}
