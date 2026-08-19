@@ -4,6 +4,7 @@ import { CalendarOff, ClipboardList } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { isoDay } from "@/components/DateRange";
 import { RoundDrawer } from "@/components/RoundDrawer";
 import { formatDate } from "@/lib/format";
 import { useRounds } from "@/lib/hooks";
@@ -56,9 +57,15 @@ export function matchRound(
   // Everything the programme's own window covers, newest first. A spray that
   // answers a Monday and a Thursday walk should show both, not pick one and
   // discard the other.
+  //
+  // Compared on the *local* calendar day. Slicing the ISO string takes the UTC
+  // day, and east of Greenwich — Kenya is UTC+3 — a round walked early enough
+  // falls on the previous UTC date. The builder resolves its window through
+  // the API, so a UTC comparison here quietly disagreed with the rounds the
+  // person actually picked.
   const inWindow = rounds
     .filter((r) => {
-      const day = r.started_at.slice(0, 10);
+      const day = isoDay(new Date(r.started_at));
       return day >= from && day <= (to ?? from);
     })
     .sort((a, b) => b.started_at.localeCompare(a.started_at));
@@ -68,7 +75,7 @@ export function matchRound(
   }
 
   const before = rounds
-    .filter((r) => r.started_at.slice(0, 10) < from)
+    .filter((r) => isoDay(new Date(r.started_at)) < from)
     .sort((a, b) => b.started_at.localeCompare(a.started_at));
   return { exact: null, nearest: before[0] ?? null, wanted: from, inWindow: [] };
 }

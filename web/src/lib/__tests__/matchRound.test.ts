@@ -111,4 +111,34 @@ describe("matchRound", () => {
     const m = matchRound(ROUNDS, "2026-08-06", "2026-08-06");
     expect(m.inWindow.map((r) => r.started_at)).toEqual(["2026-08-06T14:51:00Z"]);
   });
+
+  // ── the report's own window, and nothing outside it ────────────────────
+  it("never reaches back before the window's start", () => {
+    // The bug the client hit: the programme panel asked for every record on
+    // the block with no lower bound, so a spray answering one Tuesday walk
+    // listed months of unrelated findings.
+    const m = matchRound(ROUNDS, "2026-08-06", "2026-08-10");
+    const days = m.inWindow.map((r) => r.started_at.slice(0, 10));
+    expect(days.every((d) => d >= "2026-08-06")).toBe(true);
+    expect(days).not.toContain("2026-07-29");
+    expect(days).not.toContain("2026-07-22");
+  });
+
+  it("shows nothing at all when the programme carries no scouting date", () => {
+    // Rather than falling back to the spray's own start date, which is the day
+    // it was applied and not the day it was justified.
+    const m = matchRound(ROUNDS, null, null);
+    expect(m.inWindow).toHaveLength(0);
+    expect(m.exact).toBeNull();
+    expect(m.nearest).toBeNull();
+  });
+
+  it("matches on the local calendar day, not the UTC one", () => {
+    // The farm is UTC+3. A round at 21:30 UTC on the 5th is 00:30 local on the
+    // 6th, so it belongs to the 6th — which is the day the API would have
+    // returned it for when the programme was raised.
+    const lateUtc = [round("2026-08-05T21:30:00Z", "just-after-midnight-local")];
+    const m = matchRound(lateUtc, "2026-08-06", "2026-08-06");
+    expect(m.inWindow.map((r) => r.batch_id)).toEqual(["just-after-midnight-local"]);
+  });
 });

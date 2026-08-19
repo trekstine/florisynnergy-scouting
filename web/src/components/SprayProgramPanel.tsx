@@ -68,9 +68,13 @@ export function SprayProgramPanel({
     <div className="space-y-4">
       <Lifecycle programId={programId} head={head} status={status} canEdit={canEdit} />
       <Attachments programId={programId} canEdit={canEdit} />
+      {/* Bounded by the programme's own scouting window. Falling back to the
+          spray's start date would substitute the day it was applied for the
+          day it was justified, which is a different fact. */}
       <ScoutingBehind
         greenhouseId={head.greenhouse_id}
-        upto={head.scout_report_date ?? head.start_date}
+        from={head.scout_report_date}
+        to={head.scout_report_end_date ?? head.scout_report_date}
       />
     </div>
   );
@@ -374,17 +378,33 @@ function Attachments({ programId, canEdit }: { programId: string; canEdit: boole
 }
 
 // ── Scouting behind this block, inline ──────────────────────────────────────
+/**
+ * The scouting this programme was raised against — and only that.
+ *
+ * It used to ask for every record on the block with no lower bound, capped at
+ * the report date, so a programme answering one Tuesday walk listed months of
+ * unrelated findings. The window the programme actually carries is the whole
+ * point: it is what somebody chose when they raised it, and showing anything
+ * else invents a justification.
+ */
 function ScoutingBehind({
   greenhouseId,
-  upto,
+  from,
+  to,
 }: {
   greenhouseId: number | null;
-  upto: string | null;
+  from: string | null;
+  to: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const scouting = useScouting(
-    open && greenhouseId
-      ? { greenhouse_id: greenhouseId, end: upto ?? undefined, limit: 500 }
+    open && greenhouseId && from
+      ? {
+          greenhouse_id: greenhouseId,
+          start: from.slice(0, 10),
+          end: (to ?? from).slice(0, 10),
+          limit: 500,
+        }
       : undefined,
   );
 
@@ -415,18 +435,27 @@ function ScoutingBehind({
 
       {open && (
         <div className="border-t border-line p-4">
-          {scouting.isLoading ? (
+          {!from ? (
+            <p className="text-sm text-ink-faint">
+              This programme carries no scouting date, so there is nothing to
+              show. Edit it and set the window it answers.
+            </p>
+          ) : scouting.isLoading ? (
             <Spinner />
           ) : findings.length === 0 ? (
             <p className="text-sm text-ink-faint">
-              No findings recorded on this block before the application date.
+              No findings on this block between {formatDate(from)} and{" "}
+              {formatDate(to ?? from)} — the window this programme was raised
+              against. A preventative cover answers no report.
             </p>
           ) : (
             <>
               <p className="mb-3 text-xs text-ink-faint">
                 {findings.length} finding{findings.length === 1 ? "" : "s"} across{" "}
-                {rounds.size} round{rounds.size === 1 ? "" : "s"}, up to{" "}
-                {upto ? formatDate(upto) : "the application"}. Worst first.
+                {rounds.size} round{rounds.size === 1 ? "" : "s"}, from{" "}
+                {formatDate(from)}
+                {to && to !== from ? ` to ${formatDate(to)}` : ""} — the scouting
+                this programme was raised against. Worst first.
               </p>
               <ul className="divide-y divide-line">
                 {findings.slice(0, 12).map((r) => (
@@ -459,7 +488,8 @@ function ScoutingBehind({
               <div className="mt-3">
                 <ScoutingBehindLink
                   greenhouseId={greenhouseId}
-                  reportDate={upto}
+                  reportDate={from}
+                  reportEndDate={to}
                   label="Open the full scouting report"
                 />
               </div>

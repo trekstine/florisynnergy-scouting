@@ -371,9 +371,12 @@ function ProgramDetail({
             </span>
           )}
         </span>
+        {/* No fallback to start_date: the day it was sprayed is not the day it
+            was justified, and substituting one for the other is how the wrong
+            rounds came to be shown. */}
         <ScoutingBehindLink
           greenhouseId={head.greenhouse_id}
-          reportDate={head.scout_report_date ?? head.start_date}
+          reportDate={head.scout_report_date}
           reportEndDate={head.scout_report_end_date}
           className="flex items-center gap-1 font-semibold text-brand-700 hover:underline"
         />
